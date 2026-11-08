@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f15a22">
+  <title>Material Wizard - PBR materials for BeamNG</title>
+  <meta name="description" content="Make PBR materials for BeamNG.drive from one photo: base color, height, normal, roughness, metallic, AO and opacity, with seamless tiling. Runs in your browser, nothing is uploaded.">
+  <link rel="canonical" href="https://przemekwolw.github.io/material-wizard/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Car_Killer">
+  <meta property="og:url" content="https://przemekwolw.github.io/material-wizard/">
+  <meta property="og:title" content="Material Wizard - PBR materials for BeamNG">
+  <meta property="og:description" content="Make PBR materials for BeamNG.drive from one photo: base color, height, normal, roughness, metallic, AO and opacity, with seamless tiling. Runs in your browser, nothing is uploaded.">
+  <meta property="og:image" content="https://przemekwolw.github.io/material-wizard/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Material Wizard: PBR materials for BeamNG from one photo, with seamless tiling.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%23f15a22' width='100' height='100'/><text x='50' y='50' font-family='Segoe UI,sans-serif' font-size='56' font-weight='600' fill='%23fff' text-anchor='middle' dominant-baseline='central'>C/K</text></svg>">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="./material-wizard.css">
+</head>
+<body>
+  <header class="topnav mw-top">
+    <a href="../#tools"><span class="mw-round"><i class="fa-solid fa-arrow-left"></i></span><span data-copy="back"></span></a>
+    <div class="mw-brand">
+      <strong data-copy="title"></strong>
+      <span data-copy="tagline"></span>
+    </div>
+    <div class="mw-top-tools">
+      <label class="mw-lang"><i class="fa-solid fa-language"></i><select id="language" data-title="language"></select></label>
+      <button type="button" class="theme-toggle mw-round" id="theme-toggle" data-title="theme"><i class="fa-regular fa-sun"></i></button>
+    </div>
+  </header>
+
+  <div class="mw-page">
+    <div class="mw-stage">
+      <div class="mw-canvas-wrap" id="drop">
+        <canvas id="view"></canvas>
+        <p class="mw-lit-tip" id="lit-tip" hidden data-copy="preview.hint"></p>
+        <div class="mw-tile-bar" id="tile-bar" hidden>
+          <div class="mw-seg">
+            <button type="button" data-tile-view="frame" data-copy="tile.viewFrame"></button>
+            <button type="button" data-tile-view="tiled" data-copy="tile.viewTiled"></button>
+          </div>
+          <label class="mw-tile-zoom"><span data-copy="zoom"></span>
+            <input type="range" id="tile-zoom" min="1" max="8" step="0.05" value="1" data-title="tile.zoomTip">
+          </label>
+        </div>
+        <div class="mw-drop"><span><i class="fa-regular fa-image"></i><br><span data-copy="drop"></span></span></div>
+      </div>
+      <div class="mw-strip" id="map-strip"></div>
+      <div class="mw-viewbar">
+        <button type="button" id="undo" data-title="undoTip" disabled><i class="fa-solid fa-rotate-left"></i> <span data-copy="undo"></span></button>
+        <button type="button" id="redo" data-title="redoTip" disabled><i class="fa-solid fa-rotate-right"></i> <span data-copy="redo"></span></button>
+        <label class="mw-field"><span data-copy="view"></span>
+          <select id="view-mode">
+            <option value="albedo" data-copy="views.albedo"></option>
+            <option value="source" data-copy="views.source"></option>
+            <option value="height" data-copy="views.height"></option>
+            <option value="normal" data-copy="views.normal"></option>
+            <option value="detail" data-copy="views.detail"></option>
+            <option value="ao" data-copy="views.ao"></option>
+            <option value="rough" data-copy="views.rough"></option>
+            <option value="metal" data-copy="views.metal"></option>
+            <option value="opacity" data-copy="views.opacity"></option>
+            <option value="region" data-copy="views.region"></option>
+            <option value="preview" data-copy="views.preview"></option>
+          </select>
+        </label>
+        <label class="mw-field"><span data-copy="previewShape"></span>
+          <select data-param="shape">
+            <option value="plane" data-copy="plane"></option>
+            <option value="sphere" data-copy="sphere"></option>
+            <option value="cube" data-copy="cube"></option>
+          </select>
+        </label>
+        <label class="mw-field"><span data-copy="layout"></span>
+          <select data-param="layout">
+            <option value="1x1">1x1</option>
+            <option value="1x2">1x2</option>
+            <option value="1x3">1x3</option>
+            <option value="1x4">1x4</option>
+            <option value="2x1">2x1</option>
+            <option value="2x2">2x2</option>
+            <option value="3x3">3x3</option>
+          </select>
+        </label>
+        <label class="mw-check"><input type="checkbox" data-param="seamLines"> <span data-copy="seamLines"></span></label>
+        <label class="mw-field"><span data-copy="split"></span>
+          <input type="range" data-param="split" min="0" max="1" step="0.01" value="0">
+        </label>
+        <label class="mw-field"><span data-copy="zoom"></span>
+          <input type="range" id="zoom" min="1" max="8" step="0.05" value="1" data-title="zoomTip">
+        </label>
+      </div>
+      <div class="mw-warnings" id="warnings"></div>
+      <p class="mw-note" id="scale-note"></p>
+    </div>
+
+    <div class="mw-split" id="split" role="separator" aria-orientation="vertical" tabindex="0" data-title="splitTip"></div>
+
+    <aside>
+      <div class="mw-actions mw-presets">
+        <select id="preset-list" data-title="presets.tip"></select>
+        <input type="text" id="preset-name" maxlength="40" data-title="presets.saveTip" data-placeholder="presets.name">
+        <button type="button" id="preset-save" data-copy="presets.save"></button>
+        <button type="button" id="preset-delete" data-copy="presets.delete" data-title="presets.deleteTip"></button>
+      </div>
+      <nav class="mw-tabs" id="tabs">
+        <button type="button" data-tab="maps" class="is-active"><span data-copy="tabs.maps"></span></button>
+        <button type="button" data-tab="tile"><span data-copy="tabs.tile"></span></button>
+        <button type="button" data-tab="albedo"><span data-copy="tabs.albedo"></span></button>
+        <button type="button" data-tab="shape"><span data-copy="tabs.shape"></span></button>
+        <button type="button" data-tab="surface"><span data-copy="tabs.surface"></span></button>
+        <button type="button" data-tab="preview"><span data-copy="tabs.preview"></span></button>
+        <button type="button" data-tab="export"><span data-copy="tabs.export"></span></button>
+      </nav>
+
+      <section class="mw-panel" data-panel="maps">
+        <h2 data-copy="maps.title"></h2>
+        <p class="mw-note" data-copy="maps.intro"></p>
+        <div class="mw-actions">
+          <button type="button" id="open-photo" class="mw-primary"><i class="fa-regular fa-folder-open"></i> <span data-copy="maps.open"></span></button>
+          <input type="file" id="open-file" accept="image/*" class="mw-hidden">
+          <label class="mw-text"><span data-copy="maps.previewSize"></span>
+            <select data-param="previewSize" data-title="maps.previewSizeTip">
+              <option>512</option>
+              <option>1024</option>
+              <option selected>2048</option>
+              <option value="full" data-copy="maps.previewFull"></option>
+            </select>
+          </label>
+          <label class="mw-text"><span data-copy="maps.shape"></span>
+            <select data-param="pot" data-title="maps.shapeTip">
+              <option value="auto" data-copy="maps.auto"></option>
+              <option value="1:1">1:1</option>
+              <option value="1:2">1:2</option>
+              <option value="2:1">2:1</option>
+              <option value="1:4">1:4</option>
+              <option value="4:1">4:1</option>
+              <option value="1:8">1:8</option>
+              <option value="8:1">8:1</option>
+            </select>
+          </label>
+        </div>
+        <div id="slots"></div>
+        <details class="mw-more">
+          <summary data-copy="maps.lights"></summary>
+          <p class="mw-note" data-copy="maps.lightsNote"></p>
+          <div class="mw-lights" id="lights"></div>
+          <div class="mw-actions">
+            <button type="button" id="add-light"><span data-copy="maps.addLight"></span></button>
+            <button type="button" id="solve-lights"><span data-copy="maps.solve"></span></button>
+          </div>
+          <input type="file" id="light-file" accept="image/*" class="mw-hidden">
+        </details>
+      </section>
+
+      <section class="mw-panel mw-hidden" data-panel="tile">
+        <h2 data-copy="tile.title"></h2>
+        <p class="mw-note" data-copy="tile.intro"></p>
+        <div class="mw-actions">
+          <button type="button" data-preset="surface"><span data-copy="tile.surface"></span></button>
+          <button type="button" data-preset="road"><span data-copy="tile.roadPreset"></span></button>
+          <button type="button" data-preset="decal"><span data-copy="tile.decal"></span></button>
+        </div>
+        <div class="mw-actions">
+          <label class="mw-text"><span data-copy="tile.frame"></span>
+            <select data-param="cropShape">
+              <option value="auto" data-copy="tile.frameAuto"></option>
+              <option value="free" data-copy="tile.frameFree"></option>
+              <option value="1:1">1:1</option>
+              <option value="2:1">2:1</option>
+              <option value="1:2">1:2</option>
+              <option value="4:1">4:1</option>
+              <option value="1:4">1:4</option>
+              <option value="8:1">8:1</option>
+              <option value="1:8">1:8</option>
+            </select>
+          </label>
+          <button type="button" id="fit-frame" data-copy="tile.fit" data-title="tile.fitTip"></button>
+          <input type="hidden" data-param="crop" value="">
+        </div>
+        <h3 class="mw-sub" data-copy="tile.edges"></h3>
+        <div class="mw-pad">
+          <label class="mw-toggle mw-pad-up" data-axis="y"><input type="checkbox" data-param="tileUp" checked><span data-copy="tile.edgeTop"></span></label>
+          <label class="mw-toggle mw-pad-left" data-axis="x"><input type="checkbox" data-param="tileLeft" checked><span data-copy="tile.edgeLeft"></span></label>
+          <div class="mw-pad-tile"></div>
+          <label class="mw-toggle mw-pad-right" data-axis="x"><input type="checkbox" data-param="tileRight"><span data-copy="tile.edgeRight"></span></label>
+          <label class="mw-toggle mw-pad-down" data-axis="y"><input type="checkbox" data-param="tileDown"><span data-copy="tile.edgeBottom"></span></label>
+        </div>
+        <p class="mw-note" data-copy="tile.edgesNote"></p>
+        <div class="mw-fades">
+          <div class="mw-fade" data-fade="up" data-axis="y"><div class="mw-fade-head"><span class="mw-fade-name" data-copy="tile.edgeTop"></span><label class="mw-fade-eye" data-title="tile.highlightTip"><input type="checkbox" data-cover="up" checked><i class="fa-regular fa-eye"></i></label></div>
+            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="upA" min="0" max="0.5" step="0.005" value="0.03"></label>
+            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="upB" min="0" max="0.5" step="0.005" value="0.2"></label>
+          </div>
+          <div class="mw-fade" data-fade="left" data-axis="x"><div class="mw-fade-head"><span class="mw-fade-name" data-copy="tile.edgeLeft"></span><label class="mw-fade-eye" data-title="tile.highlightTip"><input type="checkbox" data-cover="left" checked><i class="fa-regular fa-eye"></i></label></div>
+            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="leftA" min="0" max="0.5" step="0.005" value="0.03"></label>
+            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="leftB" min="0" max="0.5" step="0.005" value="0.2"></label>
+          </div>
+          <div class="mw-fade" data-fade="right" data-axis="x"><div class="mw-fade-head"><span class="mw-fade-name" data-copy="tile.edgeRight"></span><label class="mw-fade-eye" data-title="tile.highlightTip"><input type="checkbox" data-cover="right" checked><i class="fa-regular fa-eye"></i></label></div>
+            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="rightA" min="0" max="0.5" step="0.005" value="0.03"></label>
+            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="rightB" min="0" max="0.5" step="0.005" value="0.2"></label>
+          </div>
+          <div class="mw-fade" data-fade="down" data-axis="y"><div class="mw-fade-head"><span class="mw-fade-name" data-copy="tile.edgeBottom"></span><label class="mw-fade-eye" data-title="tile.highlightTip"><input type="checkbox" data-cover="down" checked><i class="fa-regular fa-eye"></i></label></div>
+            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="downA" min="0" max="0.5" step="0.005" value="0.03"></label>
+            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="downB" min="0" max="0.5" step="0.005" value="0.2"></label>
+          </div>
+        </div>
+        <label class="mw-text"><span data-copy="tile.blend"></span>
+          <select data-param="tileBlend">
+            <option value="cut" data-copy="tile.blendCut"></option>
+            <option value="fade" data-copy="tile.blendFade"></option>
+          </select>
+        </label>
+        <label class="mw-field"><span data-copy="tile.soft"></span>
+          <input type="range" data-param="tileSoft" min="0" max="1" step="0.01" value="0.3">
+        </label>
+        <p class="mw-seam" id="seam-note"></p>
+        <details class="mw-more">
+          <summary data-copy="tile.road"></summary>
+          <label class="mw-field"><span data-copy="tile.runs"></span>
+            <select data-param="roadRuns">
+              <option value="up" data-copy="tile.up"></option>
+              <option value="left" data-copy="tile.left"></option>
+              <option value="right" data-copy="tile.right"></option>
+            </select>
+          </label>
+          <label class="mw-field"><span data-copy="tile.width"></span>
+            <input type="number" data-param="roadWidth" min="0.2" step="0.1" value="7">
+          </label>
+        </details>
+        <details class="mw-more" id="fix-tools">
+          <summary data-copy="tile.fix"></summary>
+          <p class="mw-note" data-copy="tile.fixNote"></p>
+          <div class="mw-seg" id="fix-mode">
+            <button type="button" data-fix-mode="rotate" class="is-active"><i class="fa-solid fa-rotate"></i> <span data-copy="tile.straighten"></span></button>
+            <button type="button" data-fix-mode="quad"><i class="fa-regular fa-object-ungroup"></i> <span data-copy="tile.perspective"></span></button>
+          </div>
+          <div class="mw-fix" data-fix="rotate">
+            <p class="mw-note" data-copy="tile.rotateNote"></p>
+            <label class="mw-field"><span data-copy="tile.angle"></span><output id="fix-angle-value">0.0°</output>
+              <input type="range" id="fix-angle" min="-45" max="45" step="0.1" value="0">
+            </label>
+            <div class="mw-actions">
+              <button type="button" id="straighten"><i class="fa-solid fa-wand-magic-sparkles"></i> <span data-copy="tile.auto"></span></button>
+              <button type="button" id="fix-angle-reset"><span data-copy="tile.reset"></span></button>
+              <button type="button" class="mw-primary" id="apply-rotate"><i class="fa-solid fa-check"></i> <span data-copy="tile.apply"></span></button>
+            </div>
+          </div>
+          <div class="mw-fix" data-fix="quad" hidden>
+            <p class="mw-note" data-copy="tile.quadNote"></p>
+            <input type="hidden" id="quad" value="0,0, 1,0, 1,1, 0,1">
+            <div class="mw-actions">
+              <button type="button" id="quad-reset"><span data-copy="tile.reset"></span></button>
+              <button type="button" class="mw-primary" id="rectify"><i class="fa-solid fa-check"></i> <span data-copy="tile.apply"></span></button>
+            </div>
+          </div>
+          <div class="mw-actions">
+            <button type="button" id="find-repeat"><i class="fa-solid fa-magnifying-glass"></i> <span data-copy="tile.find"></span></button>
+          </div>
+          <p class="mw-note" id="repeat-note"></p>
+        </details>
+      </section>
+
+      <section class="mw-panel mw-hidden" data-panel="albedo">
+        <h2 data-copy="albedo.title"></h2>
+        <label class="mw-check"><input type="checkbox" data-param="delightLoaded"> <span data-copy="albedo.loaded"></span></label>
+        <label class="mw-field"><span data-copy="albedo.flatten"></span>
+          <input type="range" data-param="delight" min="0" max="1.5" step="0.01" value="0.65">
+        </label>
+        <label class="mw-field"><span data-copy="albedo.highlights"></span>
+          <input type="range" data-param="highlight" min="0" max="1" step="0.01" value="0.8">
+        </label>
+        <label class="mw-field"><span data-copy="albedo.relief"></span>
+          <input type="range" data-param="relief" min="0" max="1" step="0.01" value="0">
+        </label>
+        <label class="mw-field"><span data-copy="albedo.brightness"></span>
+          <input type="range" data-param="targetMean" min="0.05" max="0.5" step="0.01" value="0.18">
+        </label>
+        <div class="mw-actions">
+          <button type="button" id="pick-white"><span data-copy="albedo.pick"></span></button>
+          <button type="button" id="clear-white"><span data-copy="albedo.reset"></span></button>
+        </div>
+      </section>
+
+      <section class="mw-panel mw-hidden" data-panel="shape">
+        <h2 data-copy="shape.title"></h2>
+        <label class="mw-field"><span data-copy="shape.removed"></span>
+          <input type="range" data-param="heightRelief" min="0" max="1" step="0.01" value="0.35">
+        </label>
+        <label class="mw-field"><span data-copy="shape.contrast"></span>
+          <input type="range" data-param="heightContrast" min="0.2" max="4" step="0.01" value="1.5">
+        </label>
+        <label class="mw-field"><span data-copy="shape.bias"></span>
+          <input type="range" data-param="heightBias" min="-0.5" max="0.5" step="0.01" value="0">
+        </label>
+        <label class="mw-field"><span data-copy="shape.strength"></span>
+          <input type="range" data-param="normalStrength" min="0" max="4" step="0.01" value="1">
+        </label>
+        <label class="mw-field"><span data-copy="shape.smooth"></span>
+          <input type="range" data-param="normalSmooth" min="0" max="3" step="0.05" value="0.5">
+        </label>
+        <details class="mw-more">
+          <summary data-copy="shape.bands"></summary>
+          <label class="mw-field"><span data-copy="shape.large"></span>
+            <input type="range" data-param="band0" min="0" max="2" step="0.01" value="0.35">
+          </label>
+          <label class="mw-field"><span data-copy="shape.medium"></span>
+            <input type="range" data-param="band1" min="0" max="2" step="0.01" value="0.55">
+          </label>
+          <label class="mw-field"><span data-copy="shape.fine"></span>
+            <input type="range" data-param="band2" min="0" max="2" step="0.01" value="0.8">
+          </label>
+          <label class="mw-field"><span data-copy="shape.micro"></span>
+            <input type="range" data-param="band3" min="0" max="2" step="0.01" value="0.45">
+          </label>
+        </details>
+        <label class="mw-check"><input type="checkbox" data-param="flipY"> <span data-copy="shape.flip"></span></label>
+        <label class="mw-field"><span data-copy="shape.aoDepth"></span>
+          <input type="range" data-param="aoDepth" min="0" max="3" step="0.01" value="1">
+        </label>
+        <label class="mw-field"><span data-copy="shape.aoContrast"></span>
+          <input type="range" data-param="aoContrast" min="0.2" max="3" step="0.01" value="1">
+        </label>
+        <h2 data-copy="shape.detail"></h2>
+        <p class="mw-note" data-copy="shape.detailNote"></p>
+        <label class="mw-check"><input type="checkbox" data-param="addDetail"> <span data-copy="shape.addDetail"></span></label>
+        <label class="mw-field"><span data-copy="shape.detailStrength"></span>
+          <input type="range" data-param="detailStrength" min="0" max="2" step="0.01" value="0.7">
+        </label>
+        <label class="mw-field"><span data-copy="shape.detailCutoff"></span>
+          <input type="range" data-param="detailCutoff" min="0" max="1" step="0.01" value="0.65">
+        </label>
+        <label class="mw-check"><input type="checkbox" data-param="detailAuto" checked> <span data-copy="shape.detailAuto"></span></label>
+        <label class="mw-field"><span data-copy="shape.flatOnly"></span>
+          <input type="range" data-param="detailFlatOnly" min="0" max="1" step="0.01" value="0.35">
+        </label>
+        <label class="mw-check"><input type="checkbox" data-param="atlas"> <span data-copy="shape.atlas"></span></label>
+        <label class="mw-text"><span data-copy="shape.mask"></span> <input type="file" id="mask-file" accept="image/*"></label>
+        <h2 data-copy="shape.mapDetail"></h2>
+        <p class="mw-note" data-copy="shape.mapDetailNote"></p>
+        <label class="mw-check"><input type="checkbox" data-param="addAoDetail"> <span data-copy="shape.mapDetailAo"></span></label>
+        <label class="mw-field"><span data-copy="shape.detailStrength"></span>
+          <input type="range" data-param="aoDetailAmount" min="0" max="3" step="0.01" value="1">
+        </label>
+        <label class="mw-check"><input type="checkbox" data-param="addRoughDetail"> <span data-copy="shape.mapDetailRough"></span></label>
+        <label class="mw-field"><span data-copy="shape.detailStrength"></span>
+          <input type="range" data-param="roughDetailAmount" min="0" max="3" step="0.01" value="1">
+        </label>
+        <label class="mw-check"><input type="checkbox" data-param="addMetalDetail"> <span data-copy="shape.mapDetailMetal"></span></label>
+        <label class="mw-field"><span data-copy="shape.detailStrength"></span>
+          <input type="range" data-param="metalDetailAmount" min="0" max="3" step="0.01" value="1">
+        </label>
+        <label class="mw-field"><span data-copy="shape.mapDetailSize"></span>
+          <input type="range" data-param="mapDetailSize" min="0" max="1" step="0.01" value="0.5">
+        </label>
+      </section>
+
+      <section class="mw-panel mw-hidden" data-panel="surface">
+        <h2 data-copy="surface.title"></h2>
+        <div class="mw-actions" id="class-presets"></div>
+        <label class="mw-field"><span data-copy="surface.regions"></span>
+          <input type="range" data-param="regionCount" min="1" max="4" step="1" value="3">
+        </label>
+        <div id="region-classes"></div>
+        <label class="mw-field"><span data-copy="surface.cavity"></span>
+          <input type="range" data-param="cavityRough" min="0" max="1" step="0.01" value="0.25">
+        </label>
+        <label class="mw-field"><span data-copy="surface.wear"></span>
+          <input type="range" data-param="wearRough" min="0" max="1" step="0.01" value="0.1">
+        </label>
+        <label class="mw-field"><span data-copy="surface.micro"></span>
+          <input type="range" data-param="microRough" min="0" max="1" step="0.01" value="0.15">
+        </label>
+        <label class="mw-field"><span data-copy="surface.spec"></span>
+          <input type="range" data-param="specRough" min="0" max="1" step="0.01" value="0.35">
+        </label>
+        <label class="mw-field"><span data-copy="surface.nvar"></span>
+          <input type="range" data-param="nvarRough" min="0" max="1" step="0.01" value="0.2">
+        </label>
+        <label class="mw-field"><span data-copy="surface.roughMin"></span>
+          <input type="range" data-param="roughMin" min="0" max="1" step="0.01" value="0.15">
+        </label>
+        <label class="mw-field"><span data-copy="surface.roughMax"></span>
+          <input type="range" data-param="roughMax" min="0" max="1" step="0.01" value="0.95">
+        </label>
+        <label class="mw-field"><span data-copy="surface.roughContrast"></span>
+          <input type="range" data-param="roughContrast" min="0.2" max="3" step="0.01" value="1">
+        </label>
+        <h2 data-copy="surface.metal"></h2>
+        <p class="mw-note" data-copy="surface.metalNote"></p>
+        <div id="region-metal"></div>
+        <label class="mw-field"><span data-copy="surface.metalWear"></span>
+          <input type="range" data-param="metalWear" min="0" max="1" step="0.01" value="0">
+        </label>
+        <label class="mw-field"><span data-copy="surface.metalSharp"></span>
+          <input type="range" data-param="metalSharp" min="1" max="8" step="0.1" value="1">
+        </label>
+        <h2 data-copy="surface.opacity"></h2>
+        <label class="mw-field"><span data-copy="surface.edge"></span>
+          <input type="range" data-param="opacityEdge" min="0" max="0.5" step="0.01" value="0">
+        </label>
+        <label class="mw-field"><span data-copy="surface.ragged"></span>
+          <input type="range" data-param="opacityRagged" min="0" max="2" step="0.01" value="0.4">
+        </label>
+        <label class="mw-field"><span data-copy="surface.patch"></span>
+          <input type="range" data-param="opacityPatch" min="0" max="1" step="0.01" value="0">
+        </label>
+        <label class="mw-field"><span data-copy="surface.cracks"></span>
+          <input type="range" data-param="opacityCrack" min="0" max="1" step="0.01" value="0">
+        </label>
+        <label class="mw-field"><span data-copy="surface.opaque"></span>
+          <select data-param="opacityRegion">
+            <option value="-1" data-copy="surface.all"></option>
+            <option value="0" data-copy="surface.region1"></option>
+            <option value="1" data-copy="surface.region2"></option>
+            <option value="2" data-copy="surface.region3"></option>
+            <option value="3" data-copy="surface.region4"></option>
+          </select>
+        </label>
+      </section>
+
+      <section class="mw-panel mw-hidden" data-panel="preview">
+        <h2 data-copy="preview.title"></h2>
+        <p class="mw-note" data-copy="preview.note"></p>
+      </section>
+
+      <section class="mw-panel mw-hidden" data-panel="export">
+        <h2 data-copy="export.title"></h2>
+        <label class="mw-field full"><span data-copy="export.name"></span>
+          <input type="text" data-param="name" value="m_example">
+        </label>
+        <p class="mw-note" data-copy="export.nameNote"></p>
+        <p class="mw-note" data-copy="export.saveNote"></p>
+        <label class="mw-text"><span data-copy="maps.size"></span>
+          <select data-param="size" data-title="export.sizeNote">
+            <option value="source" data-copy="maps.original" selected></option>
+            <option>512</option>
+            <option>1024</option>
+            <option>2048</option>
+            <option>4096</option>
+            <option>8192</option>
+          </select>
+        </label>
+        <p class="mw-note" data-copy="export.sizeNote"></p>
+        <div class="mw-actions" id="save-maps"></div>
+        <label class="mw-field full"><span data-copy="export.folder"></span>
+          <input type="text" data-param="folder" value="/levels/example/art/textures/">
+        </label>
+        <label class="mw-field"><span data-copy="export.profile"></span>
+          <select data-param="profile">
+            <option value="level" data-copy="export.level"></option>
+            <option value="road" data-copy="export.road"></option>
+            <option value="vehicle" data-copy="export.vehicle"></option>
+          </select>
+        </label>
+        <label class="mw-field"><span data-copy="export.annotation"></span>
+          <select data-param="annotation">
+            <option>ASPHALT</option>
+            <option>SOLID_LINE</option>
+            <option>DASHED_LINE</option>
+            <option>ZEBRA_CROSSING</option>
+            <option>DIRT</option>
+          </select>
+        </label>
+        <label class="mw-field"><span data-copy="export.alpha"></span>
+          <input type="number" data-param="alphaRef" min="0" max="255" step="1" value="150">
+        </label>
+        <div class="mw-actions">
+          <button type="button" id="download" class="mw-primary"><i class="fa-solid fa-download"></i> <span data-copy="export.download"></span></button>
+        </div>
+        <h2 data-copy="export.batch"></h2>
+        <p class="mw-note" data-copy="export.batchNote"></p>
+        <input type="file" id="batch-folder" webkitdirectory multiple>
+        <div class="mw-actions">
+          <button type="button" id="run-batch"><span data-copy="export.run"></span></button>
+          <button type="button" id="write-folder"><span data-copy="export.write"></span></button>
+        </div>
+        <ul class="mw-list" id="batch-list"></ul>
+      </section>
+    </aside>
+  </div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
