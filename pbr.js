@@ -632,7 +632,7 @@ uniform vec3 uTint;
 const float FOCAL = 3.0;
 ${EQUIRECT}
 ${TONEMAP}
-// The game meters the frame and maps its average luminance to 0.7. Meter a mid grey ground instead.
+// Exposure for a mid grey ground. The frame is metered afterwards and scaled so the material averages 0.7.
 float autoExposure() {
   vec3 sky = textureLod(uIrr, uvOf(vec3(0.0, 1.0, 0.0)), 0.0).rgb;
   vec3 grey = 0.18 * (uSunColor * max(uSun.y, 0.0) / PI + sky);
@@ -735,7 +735,7 @@ Hit trace(vec3 ro, vec3 rd) {
   }
   return h;
 }
-vec3 scene(vec2 s) {
+vec4 scene(vec2 s) {
   float texA = uRes.x / max(uRes.y, 1.0);
   float viewA = uView.x / max(uView.y, 1.0);
   vec2 rep = vec2(max(uRepeatX, 1.0), max(uRepeatY, 1.0));
@@ -748,7 +748,7 @@ vec3 scene(vec2 s) {
   if (!h.ok) {
     vec3 sky = envLevel(0.0, uvOf(rd));
     sky += uSunColor * 400.0 * smoothstep(0.99996, 0.99999, dot(rd, uSun));
-    return sky * exposure;
+    return vec4(sky * exposure, 0.0);
   }
   vec3 Ng = uRot * h.N;
   vec3 T = uRot * h.T;
@@ -810,7 +810,7 @@ vec3 scene(vec2 s) {
     vec2 f = fract(uv);
     if (min(f.x, f.y) < 0.012 / max(uZoom, 1.0)) col = mix(col, vec3(1.9, 0.7, 0.26), 0.75);
   }
-  return col;
+  return vec4(col, 1.0);
 }
 void main() {
   float zoom = max(uZoom, 0.05);
@@ -819,14 +819,17 @@ void main() {
   vec2 offs[4] = vec2[4](vec2(0.125, 0.375), vec2(0.375, -0.125), vec2(-0.125, -0.375), vec2(-0.375, 0.125));
   float count = uSS > 0.5 ? 4.0 : 1.0;
   vec3 acc = vec3(0.0);
+  float cover = 0.0;
   for (int i = 0; i < 4; i++) {
     if (float(i) >= count) break;
     vec2 off = uSS > 0.5 ? offs[i] : vec2(0.0);
     vec2 p = vUv + off.x * dx + off.y * dy;
-    acc += scene((p - 0.5) / zoom + uCenter - 0.5);
+    vec4 s = scene((p - 0.5) / zoom + uCenter - 0.5);
+    acc += s.rgb;
+    cover += s.a;
   }
   vec3 hdr = min(acc / count, vec3(60000.0));
-  o = uDirect > 0.5 ? vec4(toSRGB(tonemap(hdr)), 1.0) : vec4(hdr, 1.0);
+  o = uDirect > 0.5 ? vec4(toSRGB(tonemap(hdr)), 1.0) : vec4(hdr, cover / count);
 }`,
 
   // Karis average + quadratic threshold on the first downsample, 13 tap downsample after, tent upsample added back with blending.
@@ -837,7 +840,11 @@ out vec4 o;
 uniform sampler2D uTex;
 uniform vec2 uTexel;
 uniform float uFirst;
-vec3 tap(vec2 d) { return textureLod(uTex, vUv + d * uTexel, 0.0).rgb; }
+uniform float uExposure;
+vec3 tap(vec2 d) {
+  vec3 c = textureLod(uTex, vUv + d * uTexel, 0.0).rgb;
+  return uFirst > 0.5 ? c * uExposure : c;
+}
 float wKaris(vec3 c) { return 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722))); }
 void main() {
   if (uFirst > 0.5) {
@@ -884,10 +891,26 @@ out vec4 o;
 uniform sampler2D uHdr;
 uniform sampler2D uBloom;
 uniform float uBloomScale;
+uniform float uExposure;
 ${TONEMAP}
 void main() {
-  vec3 c = textureLod(uHdr, vUv, 0.0).rgb + uBloomScale * textureLod(uBloom, vUv, 0.0).rgb;
+  vec3 c = textureLod(uHdr, vUv, 0.0).rgb * uExposure + uBloomScale * textureLod(uBloom, vUv, 0.0).rgb;
   o = vec4(toSRGB(tonemap(c)), 1.0);
+}`,
+
+  // One mip texel of the lit frame as log2 luminance (-12..12) packed into 16 bits, plus coverage (sky is alpha 0, material is 1).
+  meter: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uTex;
+uniform float uLod;
+void main() {
+  vec4 c = textureLod(uTex, vUv, uLod);
+  float y = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+  float v = floor(clamp((log2(max(y, 1e-6)) + 12.0) / 24.0, 0.0, 1.0) * 65535.0 + 0.5);
+  float hi = floor(v / 256.0);
+  o = vec4(hi / 255.0, (v - hi * 256.0) / 255.0, c.a, 1.0);
 }`,
 };
 
@@ -979,6 +1002,10 @@ export function createEngine(canvas) {
   const used = new Set();
   let skyKey = '';
   let skyUp = [0, 0, 0];
+  let shownScale = null;
+  let exposureTime = 0;
+  let adaptQueued = false;
+  let liveParams = null;
   let factors = { roughness: 1, metallic: 1, opacity: 1, normal: 1 };
   let tint = [1, 1, 1];
 
@@ -1487,8 +1514,85 @@ export function createEngine(canvas) {
     return 0.7 / Math.max(0.2126 * grey[0] + 0.7152 * grey[1] + 0.0722 * grey[2], 1e-6);
   }
 
+  function targetLuminance(sunRgb) {
+    const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    const factor = Math.min(1, lum(sunRgb) / lum(sunColor([0, 1, 0])));
+    const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+    const horizon = 0.00154;
+    return factor <= horizon
+      ? 0.05 + 0.05 * smooth(0, horizon, factor)
+      : 0.1 + 0.6 * smooth(horizon, 1, factor);
+  }
+
+  function exposureScale(hdr, sunRgb) {
+    const lod = Math.max(0, Math.ceil(Math.log2(Math.max(hdr.w, hdr.h) / 64)));
+    gl.bindTexture(gl.TEXTURE_2D, hdr.tex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+    const meter = rt('meter', Math.max(1, hdr.w >> lod), Math.max(1, hdr.h >> lod));
+    draw('meter', meter, { uTex: hdr }, { uLod: lod });
+    gl.bindTexture(gl.TEXTURE_2D, hdr.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    const buf = read(meter);
+    const material = [];
+    const sky = [];
+    for (let i = 0; i < buf.length; i += 4) {
+      const log = (buf[i] * 256 + buf[i + 1]) / 65535 * 24 - 12;
+      if (buf[i + 2] >= 128) material.push(log);
+      else sky.push(log);
+    }
+    const target = targetLuminance(sunRgb);
+    const scaleOf = (logs) => {
+      if (!logs.length) return null;
+      logs.sort((a, b) => a - b);
+      const n = logs.length;
+      const lo = Math.floor(n * 0.3);
+      const hi = Math.max(lo + 1, Math.ceil(n * 0.9));
+      let avg = 0;
+      for (let i = lo; i < hi; i++) avg += logs[i];
+      avg /= hi - lo;
+      const highlightOut = Math.log2(target) + logs[Math.min(n - 1, Math.floor(n * 0.97))] - avg;
+      avg += Math.min(0.75 * Math.max(highlightOut - 1, 0), 2);
+      const scale = target / 2 ** avg;
+      return Number.isFinite(scale) ? Math.min(32, Math.max(1 / 32, scale)) : null;
+    };
+    const scales = [];
+    const materialScale = scaleOf(material);
+    const skyScale = sky.length >= buf.length * 0.02 ? scaleOf(sky) : null;
+    if (materialScale != null) scales.push(materialScale);
+    if (skyScale != null) scales.push(skyScale);
+    if (!scales.length) return 1;
+    return Math.min.apply(null, scales);
+  }
+
+  // Ease in log space. Closing down (a brighter scene) is quicker, and tiny meter noise is ignored.
+  function smoothScale(target) {
+    const now = performance.now();
+    if (shownScale == null) {
+      shownScale = target;
+      exposureTime = now;
+      return target;
+    }
+    const dt = Math.min(0.05, Math.max(0, (now - exposureTime) / 1000));
+    exposureTime = now;
+    const delta = Math.log(target) - Math.log(shownScale);
+    if (Math.abs(delta) < 0.05) return shownScale;
+    const speed = delta < 0 ? 12 : 5;
+    shownScale = Math.exp(Math.log(shownScale) + delta * (1 - Math.exp(-Math.max(dt, 0.001) * speed)));
+    return shownScale;
+  }
+
+  function queueExposure() {
+    if (adaptQueued || !liveParams) return;
+    adaptQueued = true;
+    requestAnimationFrame(() => {
+      adaptQueued = false;
+      if (liveParams) present('preview', liveParams);
+    });
+  }
+
   // The preview sun is 22 against the game's 100000, so the EV is taken in game units.
-  function bloomChain(hdr, exposure) {
+  function bloomChain(hdr, exposure, scale) {
     const ev = -Math.log2(exposure * 22 / 100000);
     const aperture = 1.4 + Math.min(Math.max((ev + 5) / 20, 0), 1) * (22 - 1.4);
     let count = Math.min(9, Math.max(1, Math.floor(Math.log2(Math.max(hdr.w, hdr.h)) + 1) - 2));
@@ -1498,7 +1602,7 @@ export function createEngine(canvas) {
     for (let i = 1; i < count; i++) {
       const src = levels[i - 1];
       const dst = rt('bloom' + i, Math.max(1, hdr.w >> i), Math.max(1, hdr.h >> i), true);
-      draw('bloomDown', dst, { uTex: src }, { uTexel: [1 / src.w, 1 / src.h], uFirst: i === 1 ? 1 : 0 });
+      draw('bloomDown', dst, { uTex: src }, { uTexel: [1 / src.w, 1 / src.h], uFirst: i === 1 ? 1 : 0, uExposure: i === 1 ? scale : 1 });
       levels.push(dst);
     }
     gl.enable(gl.BLEND);
@@ -1528,6 +1632,7 @@ export function createEngine(canvas) {
   }
 
   function present(view, params) {
+    if (view !== 'preview') liveParams = null;
     if (!finals.albedo) return;
     const size = screenSize(view, params);
     screenW = size[0];
@@ -1597,8 +1702,18 @@ export function createEngine(canvas) {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       });
       if (hdr) {
-        const bloom = bloomChain(hdr, exposureOf(sun, sunRgb));
-        draw('litFinal', null, { uHdr: hdr, uBloom: bloom ? bloom.tex : hdr }, { uBloomScale: bloom ? bloom.weight : 0 });
+        const target = exposureScale(hdr, sunRgb);
+        let scale = target;
+        if (params.viewSize) {
+          liveParams = params;
+          scale = smoothScale(target);
+          if (Math.abs(Math.log(target / scale)) > 0.05) queueExposure();
+        }
+        const bloom = bloomChain(hdr, exposureOf(sun, sunRgb) * scale, scale);
+        draw('litFinal', null, { uHdr: hdr, uBloom: bloom ? bloom.tex : hdr }, {
+          uBloomScale: bloom ? bloom.weight : 0,
+          uExposure: scale,
+        });
       }
       return;
     }
