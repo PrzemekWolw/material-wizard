@@ -98,6 +98,16 @@
 
 body.mw-resizing { cursor: col-resize; user-select: none; }
 
+.mw-stage > .mw-split-h {
+  position: static;
+  height: 10px;
+  margin: -5px 0;
+  cursor: row-resize;
+  flex-direction: column;
+}
+.mw-split-h::before { width: 100%; height: 2px; }
+body.mw-resizing-h { cursor: row-resize; user-select: none; }
+
 .mw-stage {
   --mw-gap: 18px;
   position: sticky;
@@ -107,6 +117,7 @@ body.mw-resizing { cursor: col-resize; user-select: none; }
   display: flex;
   flex-direction: column;
   gap: 10px;
+  overflow: hidden;
   min-height: 0;
 }
 
@@ -238,15 +249,10 @@ body.mw-resizing { cursor: col-resize; user-select: none; }
 .mw-canvas-wrap .mw-tile-edit[hidden] { display: none; }
 
 .mw-tile-bar {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 2;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  padding: 6px 10px 6px 6px;
-  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  gap: 8px 12px;
   font-size: 14px;
 }
 .mw-tile-bar[hidden], .mw-tile-bar [hidden] { display: none; }
@@ -686,7 +692,7 @@ body.mw-resizing { cursor: col-resize; user-select: none; }
   .mw-page { grid-template-columns: 1fr !important; row-gap: 22px; }
   .mw-split { display: none; }
   .mw-stage { position: static; height: auto; }
-  .mw-canvas-wrap { flex: none; min-height: 0; }
+  .mw-canvas-wrap { flex: none !important; min-height: 0; }
   .mw-canvas-wrap canvas { position: static; height: auto; }
   .mw-canvas-wrap:not(.has-image) { min-height: 280px; }
 }

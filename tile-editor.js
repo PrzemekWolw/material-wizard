@@ -5,6 +5,7 @@ const KNOB = 7;
 const CORNER = 9;
 const HANDLE = 9;
 const MIN_FRAME = 0.02;
+const FADE_STEPS = 2000;
 const AXIS_COLOR = { left: '#38bdf8', right: '#38bdf8', up: '#facc15', down: '#facc15' };
 
 // Zoom needed so a w x h picture turned by deg still covers the whole w x h area.
@@ -36,11 +37,13 @@ export function createTileEditor(wrap, hooks) {
     const pad = 28;
     let bw;
     let bh;
-    if (state.view === 'tiled' && state.tile) {
+    if (state.view === 'tiled' && state.frame) {
       const n = 3;
-      const scale = Math.min((cw - pad * 2) / (state.tile.width * n), (ch - pad * 2) / (state.tile.height * n));
-      bw = state.tile.width * scale * n;
-      bh = state.tile.height * scale * n;
+      const tw = state.tile ? state.tile.width : state.frame.w * state.base.width;
+      const th = state.tile ? state.tile.height : state.frame.h * state.base.height;
+      const scale = Math.min((cw - pad * 2) / (tw * n), (ch - pad * 2) / (th * n));
+      bw = tw * scale * n;
+      bh = th * scale * n;
     } else {
       const scale = Math.min((cw - pad * 2) / state.base.width, (ch - pad * 2) / state.base.height);
       bw = state.base.width * scale;
@@ -137,10 +140,9 @@ export function createTileEditor(wrap, hooks) {
     const style = getComputedStyle(wrap);
     ctx.fillStyle = style.backgroundColor;
     ctx.fillRect(0, 0, cw, ch);
-    insetRect = null;
     if (state.fix) drawFix(cw, ch, style);
     else if (state.view === 'tiled') drawTiled();
-    else drawFrame(cw, ch, style);
+    else drawFrame();
   }
 
   function quadPoints(img) {
@@ -316,8 +318,15 @@ export function createTileEditor(wrap, hooks) {
     ctx.restore();
   }
 
+  // The blended tile, or the raw crop under the frame when there is none.
+  function drawTile(x, y, w, h) {
+    if (state.tile) { ctx.drawImage(state.tile, x, y, w, h); return; }
+    const f = state.frame;
+    const b = state.base;
+    ctx.drawImage(b, f.x * b.width, f.y * b.height, f.w * b.width, f.h * b.height, x, y, w, h);
+  }
+
   function drawTiled() {
-    const tile = state.tile;
     const n = 3;
     const grid = fit();
     const tw = grid.w / n;
@@ -325,7 +334,7 @@ export function createTileEditor(wrap, hooks) {
     const ox = grid.x;
     const oy = grid.y;
     for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++) ctx.drawImage(tile, ox + x * tw, oy + y * th, tw, th);
+      for (let x = 0; x < n; x++) drawTile(ox + x * tw, oy + y * th, tw, th);
     }
     if (state.seamLines) {
       ctx.save();
@@ -365,7 +374,7 @@ export function createTileEditor(wrap, hooks) {
     if (side === 'down') ctx.fillRect(fr.x, fr.y + fr.h - b, fr.w, b);
   }
 
-  function drawFrame(cw, ch, style) {
+  function drawFrame() {
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#f15a22';
     const labels = state.labels || {};
     const img = fit();
@@ -376,7 +385,7 @@ export function createTileEditor(wrap, hooks) {
     ctx.globalAlpha = 0.3;
     ctx.drawImage(base, img.x, img.y, img.w, img.h);
     ctx.globalAlpha = 1;
-    if (state.tile) ctx.drawImage(state.tile, fr.x, fr.y, fr.w, fr.h);
+    drawTile(fr.x, fr.y, fr.w, fr.h);
     const marked = (side) => !state.cover || state.cover[side] !== false;
     SIDES.forEach((side) => { if (state.sides[side].on && marked(side)) coverTint(fr, side); });
     SIDES.forEach((side) => {
@@ -426,28 +435,7 @@ export function createTileEditor(wrap, hooks) {
       ctx.stroke();
     });
     if (labels.size) pill(labels.size, fr.x + fr.w - 6, fr.y + 16, '#fff', 'right');
-    if (state.tile) {
-      const size = Math.round(Math.min(cw, ch) * 0.3);
-      const aspect = state.tile.width / state.tile.height;
-      const iw = aspect >= 1 ? size : size * aspect;
-      const ih = aspect >= 1 ? size / aspect : size;
-      const ix = cw - iw - 10;
-      const iy = ch - ih - 10;
-      ctx.globalAlpha = drag ? 0.15 : 1;
-      for (let ty = 0; ty < 2; ty++) {
-        for (let tx = 0; tx < 2; tx++) ctx.drawImage(state.tile, ix + tx * iw / 2, iy + ty * ih / 2, iw / 2, ih / 2);
-      }
-      ctx.strokeStyle = overInset ? accent : style.borderTopColor;
-      ctx.lineWidth = overInset ? 2 : 1;
-      ctx.strokeRect(ix + 0.5, iy + 0.5, iw - 1, ih - 1);
-      if (labels.inset && !drag) pill(labels.inset, ix + iw - 6, iy + 16, '#fff', 'right');
-      ctx.globalAlpha = 1;
-      insetRect = { x: ix, y: iy, w: iw, h: ih };
-    }
   }
-
-  let overInset = false;
-  let insetRect = null;
 
   function request() {
     if (!raf) raf = requestAnimationFrame(draw);
@@ -501,10 +489,6 @@ export function createTileEditor(wrap, hooks) {
       request();
       return;
     }
-    if (!panButton && overInset) {
-      hooks.onView('tiled');
-      return;
-    }
     if (!panButton && state.view === 'tiled' && view.zoom <= 1) {
       hooks.onView('frame');
       return;
@@ -547,12 +531,9 @@ export function createTileEditor(wrap, hooks) {
       }
       return;
     }
-    const wasOver = overInset;
-    overInset = !!insetRect && state.view !== 'tiled' && p.x >= insetRect.x && p.y >= insetRect.y;
     if (!drag) {
       const target = state.view === 'tiled' ? null : hit(p);
-      canvas.style.cursor = state.view === 'tiled' || overInset ? (view.zoom > 1 && !overInset ? 'grab' : 'pointer') : (target ? cursorFor(target) : (view.zoom > 1 ? 'grab' : 'default'));
-      if (wasOver !== overInset) request();
+      canvas.style.cursor = state.view === 'tiled' ? (view.zoom > 1 ? 'grab' : 'pointer') : (target ? cursorFor(target) : (view.zoom > 1 ? 'grab' : 'default'));
       return;
     }
     if (drag.kind === 'pan') {
@@ -605,10 +586,13 @@ export function createTileEditor(wrap, hooks) {
       if (drag.side === 'up') v = (p.y - fr.y) / fr.h;
       if (drag.side === 'down') v = (fr.y + fr.h - p.y) / fr.h;
       const s = state.sides[drag.side];
-      v = Math.max(0, Math.min(0.5, v));
+      const fm = state.frame;
+      const room = { left: (1 - fm.x - fm.w) / fm.w, right: fm.x / fm.w, up: (1 - fm.y - fm.h) / fm.h, down: fm.y / fm.h }[drag.side];
+      const max = Math.floor(Math.min(0.5, room) * FADE_STEPS + 1e-6) / FADE_STEPS;
+      v = Math.max(0, Math.min(max, Math.round(v * FADE_STEPS) / FADE_STEPS));
       if (drag.key === 'a') v = Math.min(v, s.b);
-      else v = Math.max(v, s.a);
-      hooks.onFade(drag.side, drag.key, Math.round(v * 200) / 200);
+      else v = Math.max(v, Math.min(s.a, max));
+      hooks.onFade(drag.side, drag.key, v);
     }
   });
 
@@ -641,18 +625,13 @@ export function createTileEditor(wrap, hooks) {
       return;
     }
     const target = state.view === 'tiled' ? null : hit(p);
-    if (overInset || (target && target.kind !== 'move')) return;
+    if (target && target.kind !== 'move') return;
     setZoom(1);
   });
   canvas.addEventListener('contextmenu', (event) => {
     if (view.zoom > 1) event.preventDefault();
   });
   if (zoomInput) zoomInput.addEventListener('input', () => setZoom(Number(zoomInput.value)));
-  canvas.addEventListener('pointerleave', () => {
-    if (!overInset) return;
-    overInset = false;
-    request();
-  });
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
   new ResizeObserver(request).observe(wrap);

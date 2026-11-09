@@ -11,6 +11,7 @@
   "undoTip": "Undo (Ctrl+Z)",
   "redoTip": "Redo (Ctrl+Shift+Z)",
   "splitTip": "Drag to make the preview wider or narrower. Double-click to reset.",
+  "splitHeightTip": "Drag to make the preview taller or shorter. Double-click to reset.",
   "view": "View",
   "views": {
     "albedo": "albedo",
@@ -126,7 +127,7 @@
   "tile": {
     "title": "tile",
     "enable": "Tile this photo",
-    "intro": "Tiling stays off until you turn it on. Drag the orange frame on the photo to pick the tile, and drag a corner to resize it. Click the small square, or switch to tile repeated above the picture, to check the seams.",
+    "intro": "Tiling stays off until you turn it on. Drag the orange frame on the photo to pick the tile, and drag a corner to resize it. Switch to tile repeated above the picture to check the seams.",
     "viewFrame": "frame on photo",
     "viewTiled": "tile repeated",
     "zoomTip": "Scroll to zoom. Drag empty space, or the right mouse button, to move the picture. Double-click to reset.",
@@ -142,7 +143,6 @@
     "beyondUp": "covers the top edge",
     "beyondDown": "covers the bottom edge",
     "frameSize": "{w} x {h} px",
-    "inset": "repeated, click to enlarge",
     "surface": "Surface",
     "roadPreset": "Road",
     "frame": "Frame",

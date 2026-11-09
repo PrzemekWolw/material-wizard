@@ -37,20 +37,21 @@
 
   <div class="mw-page">
     <div class="mw-stage">
+      <div class="mw-tile-bar" id="tile-bar" hidden>
+        <div class="mw-seg">
+          <button type="button" data-tile-view="frame" data-copy="tile.viewFrame"></button>
+          <button type="button" data-tile-view="tiled" data-copy="tile.viewTiled"></button>
+        </div>
+        <label class="mw-tile-zoom"><span data-copy="zoom"></span>
+          <input type="range" id="tile-zoom" min="1" max="8" step="0.05" value="1" data-title="tile.zoomTip">
+        </label>
+      </div>
       <div class="mw-canvas-wrap" id="drop">
         <canvas id="view"></canvas>
         <p class="mw-lit-tip" id="lit-tip" hidden data-copy="preview.hint"></p>
-        <div class="mw-tile-bar" id="tile-bar" hidden>
-          <div class="mw-seg">
-            <button type="button" data-tile-view="frame" data-copy="tile.viewFrame"></button>
-            <button type="button" data-tile-view="tiled" data-copy="tile.viewTiled"></button>
-          </div>
-          <label class="mw-tile-zoom"><span data-copy="zoom"></span>
-            <input type="range" id="tile-zoom" min="1" max="8" step="0.05" value="1" data-title="tile.zoomTip">
-          </label>
-        </div>
         <div class="mw-drop"><span><i class="fa-regular fa-image"></i><br><span data-copy="drop"></span></span></div>
       </div>
+      <div class="mw-split mw-split-h" id="split-h" role="separator" aria-orientation="horizontal" tabindex="0" data-title="splitHeightTip"></div>
       <div class="mw-strip" id="map-strip"></div>
       <div class="mw-viewbar">
         <button type="button" id="undo" data-title="undoTip" disabled><i class="fa-solid fa-rotate-left"></i> <span data-copy="undo"></span></button>
@@ -195,20 +196,20 @@
         <p class="mw-note" data-copy="tile.edgesNote"></p>
         <div class="mw-fades">
           <div class="mw-fade" data-fade="up" data-axis="y"><div class="mw-fade-head"><span class="mw-fade-name" data-copy="tile.edgeTop"></span><label class="mw-fade-eye" data-title="tile.highlightTip"><input type="checkbox" data-cover="up" checked><i class="fa-regular fa-eye"></i></label></div>
-            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="upA" min="0" max="0.5" step="0.005" value="0.03"></label>
-            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="upB" min="0" max="0.5" step="0.005" value="0.2"></label>
+            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="upA" min="0" max="0.5" step="0.0005" value="0.03"></label>
+            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="upB" min="0" max="0.5" step="0.0005" value="0.2"></label>
           </div>
           <div class="mw-fade" data-fade="left" data-axis="x"><div class="mw-fade-head"><span class="mw-fade-name" data-copy="tile.edgeLeft"></span><label class="mw-fade-eye" data-title="tile.highlightTip"><input type="checkbox" data-cover="left" checked><i class="fa-regular fa-eye"></i></label></div>
-            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="leftA" min="0" max="0.5" step="0.005" value="0.03"></label>
-            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="leftB" min="0" max="0.5" step="0.005" value="0.2"></label>
+            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="leftA" min="0" max="0.5" step="0.0005" value="0.03"></label>
+            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="leftB" min="0" max="0.5" step="0.0005" value="0.2"></label>
           </div>
           <div class="mw-fade" data-fade="right" data-axis="x"><div class="mw-fade-head"><span class="mw-fade-name" data-copy="tile.edgeRight"></span><label class="mw-fade-eye" data-title="tile.highlightTip"><input type="checkbox" data-cover="right" checked><i class="fa-regular fa-eye"></i></label></div>
-            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="rightA" min="0" max="0.5" step="0.005" value="0.03"></label>
-            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="rightB" min="0" max="0.5" step="0.005" value="0.2"></label>
+            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="rightA" min="0" max="0.5" step="0.0005" value="0.03"></label>
+            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="rightB" min="0" max="0.5" step="0.0005" value="0.2"></label>
           </div>
           <div class="mw-fade" data-fade="down" data-axis="y"><div class="mw-fade-head"><span class="mw-fade-name" data-copy="tile.edgeBottom"></span><label class="mw-fade-eye" data-title="tile.highlightTip"><input type="checkbox" data-cover="down" checked><i class="fa-regular fa-eye"></i></label></div>
-            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="downA" min="0" max="0.5" step="0.005" value="0.03"></label>
-            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="downB" min="0" max="0.5" step="0.005" value="0.2"></label>
+            <label class="mw-field"><span data-copy="tile.fadeStart"></span><input type="range" data-param="downA" min="0" max="0.5" step="0.0005" value="0.03"></label>
+            <label class="mw-field"><span data-copy="tile.fadeEnd"></span><input type="range" data-param="downB" min="0" max="0.5" step="0.0005" value="0.2"></label>
           </div>
         </div>
         <label class="mw-text"><span data-copy="tile.blend"></span>

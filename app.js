@@ -239,6 +239,62 @@ splitEl.addEventListener('keydown', (event) => {
 window.addEventListener('resize', applySplit);
 applySplit();
 
+const splitHEl = document.getElementById('split-h');
+const splitHKey = 'mw-preview-height';
+let previewHeight = null;
+try { previewHeight = Number(localStorage.getItem(splitHKey)) || null; } catch (e) { /* ignore */ }
+
+function applySplitH() {
+  if (!previewHeight) { drop.style.flex = ''; return; }
+  const stage = drop.parentElement.getBoundingClientRect();
+  const above = drop.getBoundingClientRect().top - stage.top;
+  const max = stage.height - above - splitHEl.offsetHeight;
+  drop.style.flex = '0 0 ' + Math.max(160, Math.min(max, previewHeight)) + 'px';
+}
+
+function saveSplitH() {
+  try {
+    if (previewHeight) localStorage.setItem(splitHKey, String(Math.round(previewHeight)));
+    else localStorage.removeItem(splitHKey);
+  } catch (e) { /* ignore */ }
+}
+
+splitHEl.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  splitHEl.setPointerCapture(event.pointerId);
+  splitHEl.classList.add('is-dragging');
+  document.body.classList.add('mw-resizing-h');
+});
+splitHEl.addEventListener('pointermove', (event) => {
+  if (!splitHEl.hasPointerCapture(event.pointerId)) return;
+  previewHeight = event.clientY - drop.getBoundingClientRect().top;
+  applySplitH();
+});
+function endSplitH(event) {
+  if (!splitHEl.hasPointerCapture(event.pointerId)) return;
+  splitHEl.releasePointerCapture(event.pointerId);
+  splitHEl.classList.remove('is-dragging');
+  document.body.classList.remove('mw-resizing-h');
+  previewHeight = drop.getBoundingClientRect().height;
+  saveSplitH();
+}
+splitHEl.addEventListener('pointerup', endSplitH);
+splitHEl.addEventListener('pointercancel', endSplitH);
+splitHEl.addEventListener('dblclick', () => {
+  previewHeight = null;
+  applySplitH();
+  saveSplitH();
+});
+splitHEl.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+  event.preventDefault();
+  previewHeight = drop.getBoundingClientRect().height + (event.key === 'ArrowDown' ? 40 : -40);
+  applySplitH();
+  previewHeight = drop.getBoundingClientRect().height;
+  saveSplitH();
+});
+applySplitH();
+
 const VIEW_OF_SLOT = { albedo: 'albedo', height: 'height', normal: 'normal', roughness: 'rough', metallic: 'metal', ao: 'ao', opacity: 'opacity' };
 const STRIP = ['albedo', 'height', 'normal', 'rough', 'metal', 'ao', 'opacity', 'preview'];
 const THUMB = 96;
@@ -1282,8 +1338,8 @@ function refreshEditor() {
   const sides = tileSides(params);
   const frame = currentFrame(params, full.width, full.height);
   const opts = tileOpts(params);
-  let tile = preview.base;
-  if (tileActive(params)) {
+  let tile = null;
+  if (tileActive(params) && !framing) {
     const key = previewCache.key + JSON.stringify([frame, sides, opts]);
     if (previewCache.tileKey !== key) {
       const base = preview.base;
@@ -1307,13 +1363,13 @@ function refreshEditor() {
     labels: {
       beyond: { left: text('tile.beyondLeft'), right: text('tile.beyondRight'), up: text('tile.beyondUp'), down: text('tile.beyondDown') },
       size: text('tile.frameSize', { w: Math.round(frame.w * full.width), h: Math.round(frame.h * full.height) }),
-      inset: text('tile.inset'),
     },
   });
 }
 
 const tileBar = document.getElementById('tile-bar');
 let tileView = 'frame';
+let framing = false;
 function setTileView(view) {
   tileView = view;
   refreshEditor();
@@ -1424,6 +1480,7 @@ const editor = createTileEditor(drop, {
     }
   },
   onFrame(frame) {
+    framing = true;
     cropInput.value = frameString(frame);
     refreshEditor();
   },
@@ -1442,6 +1499,10 @@ const editor = createTileEditor(drop, {
   onEnd() {
     commit();
     if (fixTools.open) return;
+    if (framing) {
+      framing = false;
+      refreshEditor();
+    }
     schedule();
   },
   onView: setTileView,
