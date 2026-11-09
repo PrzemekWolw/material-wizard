@@ -73,7 +73,7 @@
   "classes.dirt": "Terra",
   "classes.wood": "Legno",
   "maps.title": "mappe",
-  "maps.intro": "Inizia con una foto. Ogni mappa viene generata da essa, a meno che tu non carichi la tua o imposti un valore fisso. Un'altezza o una mappa normali caricata alimenta le mappe che ne dipendono. Fai clic su una miniatura per vederla in grande.",
+  "maps.intro": "Inizia con una foto. Viene usata come colore di base, e le altre mappe vengono generate da essa, a meno che tu non carichi la tua o imposti un valore fisso. Un'altezza o una mappa normali caricata alimenta le mappe che ne dipendono. Fai clic su una miniatura per vederla in grande.",
   "maps.open": "Apri foto",
   "maps.size": "Dimensione di uscita",
   "maps.original": "originale",

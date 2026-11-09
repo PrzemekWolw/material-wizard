@@ -1529,20 +1529,13 @@ document.body.addEventListener('input', (event) => {
 document.body.addEventListener('change', async (event) => {
   const input = event.target.closest('[data-slot-file]');
   if (!input || !input.files[0]) return;
-  remember();
   const slot = input.dataset.slotFile;
   const image = await loadImage(input.files[0]);
   if (slot === 'albedo') {
-    SLOTS.forEach(([name]) => {
-      if (name === 'albedo') return;
-      delete slotImages[name];
-      setSlotMode(name, 'generate');
-      document.querySelector('[data-file-name="' + name + '"]').textContent = text('maps.choose');
-    });
-    original = image;
-    cropInput.value = '';
-    setNameFrom(input.files[0]);
+    useImage(image, input.files[0]);
+    return;
   }
+  remember();
   slotImages[slot] = image;
   document.querySelector('[data-file-name="' + slot + '"]').textContent = input.files[0].name;
   document.querySelector('[data-slot-mode="' + slot + '"]').value = 'load';
@@ -1573,9 +1566,18 @@ function setNameFrom(file) {
   if (name) document.querySelector('[data-param="name"]').value = name;
 }
 
-async function useImage(image, file) {
+function useImage(image, file) {
   remember();
+  SLOTS.forEach(([name]) => {
+    if (name === 'albedo') return;
+    delete slotImages[name];
+    setSlotMode(name, 'generate');
+    document.querySelector('[data-file-name="' + name + '"]').textContent = text('maps.choose');
+  });
   original = image;
+  slotImages.albedo = image;
+  setSlotMode('albedo', 'load');
+  document.querySelector('[data-file-name="albedo"]').textContent = file && file.name ? file.name : text('maps.choose');
   cropInput.value = '';
   setNameFrom(file);
   commit();

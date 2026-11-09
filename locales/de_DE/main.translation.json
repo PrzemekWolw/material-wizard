@@ -73,7 +73,7 @@
   "classes.dirt": "Erde",
   "classes.wood": "Holz",
   "maps.title": "Maps",
-  "maps.intro": "Beginne mit einem Foto. Jede Map wird daraus erzeugt, außer du lädst eine eigene oder setzt einen festen Wert. Eine geladene Höhe oder Normal-Map speist die Maps, die davon abhängen. Klicke auf ein Vorschaubild, um es groß zu sehen.",
+  "maps.intro": "Beginne mit einem Foto. Es wird als Grundfarbe verwendet, und die anderen Maps werden daraus erzeugt, außer du lädst eine eigene oder setzt einen festen Wert. Eine geladene Höhe oder Normal-Map speist die Maps, die davon abhängen. Klicke auf ein Vorschaubild, um es groß zu sehen.",
   "maps.open": "Foto öffnen",
   "maps.size": "Ausgabegröße",
   "maps.original": "Original",

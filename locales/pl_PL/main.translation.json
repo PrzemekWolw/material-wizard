@@ -73,7 +73,7 @@
   "classes.dirt": "Ziemia",
   "classes.wood": "Drewno",
   "maps.title": "mapy",
-  "maps.intro": "Zacznij od zdjęcia. Każda mapa powstaje z niego, chyba że wczytasz własną albo ustawisz stałą wartość. Wczytana wysokość lub mapa normalnych zasila mapy, które od nich zależą. Kliknij miniaturę, aby zobaczyć ją w dużym widoku.",
+  "maps.intro": "Zacznij od zdjęcia. Jest ono kolorem bazowym, a pozostałe mapy powstają z niego, chyba że wczytasz własne albo ustawisz stałą wartość. Wczytana wysokość lub mapa normalnych zasila mapy, które od nich zależą. Kliknij miniaturę, aby zobaczyć ją w dużym widoku.",
   "maps.open": "Otwórz zdjęcie",
   "maps.size": "Rozmiar wyjściowy",
   "maps.original": "oryginalny",

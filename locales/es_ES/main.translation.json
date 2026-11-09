@@ -73,7 +73,7 @@
   "classes.dirt": "Tierra",
   "classes.wood": "Madera",
   "maps.title": "mapas",
-  "maps.intro": "Empieza con una foto. Cada mapa se genera a partir de ella, salvo que cargues el tuyo o pongas un valor fijo. Una altura o un mapa de normales cargados alimentan los mapas que dependen de ellos. Haz clic en una miniatura para verla en grande.",
+  "maps.intro": "Empieza con una foto. Se usa como color base, y los demás mapas se generan a partir de ella, salvo que cargues el tuyo o pongas un valor fijo. Una altura o un mapa de normales cargados alimentan los mapas que dependen de ellos. Haz clic en una miniatura para verla en grande.",
   "maps.open": "Abrir foto",
   "maps.size": "Tamaño de salida",
   "maps.original": "original",

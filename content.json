@@ -88,7 +88,7 @@
   },
   "maps": {
     "title": "maps",
-    "intro": "Start with a photo. Every map is generated from it unless you load your own or set a flat value. A loaded height or normal feeds the maps that depend on it. Click a thumbnail to view it large.",
+    "intro": "Start with a photo. It is used as the base color, and the other maps are generated from it unless you load your own or set a flat value. A loaded height or normal feeds the maps that depend on it. Click a thumbnail to view it large.",
     "open": "Open photo",
     "size": "Output size",
     "original": "original",
