@@ -143,6 +143,7 @@ export function createTileEditor(wrap, hooks) {
     if (state.fix) drawFix(cw, ch, style);
     else if (state.view === 'tiled') drawTiled();
     else drawFrame();
+    if (state.off && !state.fix && state.labels && state.labels.off) pill(state.labels.off, cw / 2, 18, '#fff');
   }
 
   function quadPoints(img) {
@@ -326,6 +327,20 @@ export function createTileEditor(wrap, hooks) {
     ctx.drawImage(b, f.x * b.width, f.y * b.height, f.w * b.width, f.h * b.height, x, y, w, h);
   }
 
+  let cropCanvas = null;
+  function tileSource() {
+    if (state.tile) return state.tile;
+    const f = state.frame;
+    const b = state.base;
+    const w = Math.max(1, Math.round(f.w * b.width));
+    const h = Math.max(1, Math.round(f.h * b.height));
+    if (!cropCanvas) cropCanvas = document.createElement('canvas');
+    if (cropCanvas.width !== w || cropCanvas.height !== h) { cropCanvas.width = w; cropCanvas.height = h; }
+    cropCanvas.getContext('2d').drawImage(b, f.x * b.width, f.y * b.height, f.w * b.width, f.h * b.height, 0, 0, w, h);
+    return cropCanvas;
+  }
+
+  // One repeating pattern, so neighbouring copies share their edge pixels and no hairline shows between them.
   function drawTiled() {
     const n = 3;
     const grid = fit();
@@ -333,9 +348,13 @@ export function createTileEditor(wrap, hooks) {
     const th = grid.h / n;
     const ox = grid.x;
     const oy = grid.y;
-    for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++) drawTile(ox + x * tw, oy + y * th, tw, th);
-    }
+    const src = tileSource();
+    const pattern = ctx.createPattern(src, 'repeat');
+    pattern.setTransform(new DOMMatrix().translateSelf(ox, oy).scaleSelf(tw / src.width, th / src.height));
+    ctx.save();
+    ctx.fillStyle = pattern;
+    ctx.fillRect(ox, oy, grid.w, grid.h);
+    ctx.restore();
     if (state.seamLines) {
       ctx.save();
       ctx.strokeStyle = 'rgba(255,255,255,0.5)';
@@ -382,6 +401,18 @@ export function createTileEditor(wrap, hooks) {
     const base = state.base;
     const sx = base.width / img.w;
     const sy = base.height / img.h;
+    if (state.off) {
+      ctx.drawImage(base, img.x, img.y, img.w, img.h);
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = 'rgba(200,200,200,0.8)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(fr.x, fr.y, fr.w, fr.h);
+      ctx.restore();
+      ctx.fillStyle = 'rgba(200,200,200,0.8)';
+      corners(fr).forEach((c) => ctx.fillRect(c.x - 5, c.y - 5, 10, 10));
+      return;
+    }
     ctx.globalAlpha = 0.3;
     ctx.drawImage(base, img.x, img.y, img.w, img.h);
     ctx.globalAlpha = 1;
@@ -449,7 +480,7 @@ export function createTileEditor(wrap, hooks) {
   function hit(p) {
     const img = fit();
     const fr = frameRect(img);
-    const knob = knobs(fr).find((k) => Math.hypot(p.x - k.x, p.y - k.y) <= KNOB + 3);
+    const knob = !state.off && knobs(fr).find((k) => Math.hypot(p.x - k.x, p.y - k.y) <= KNOB + 3);
     if (knob) return { kind: 'knob', side: knob.side, key: knob.key };
     const corner = corners(fr).find((c) => Math.abs(p.x - c.x) <= CORNER && Math.abs(p.y - c.y) <= CORNER);
     if (corner) return { kind: 'corner', cx: corner.cx, cy: corner.cy };

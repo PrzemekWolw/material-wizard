@@ -1174,17 +1174,57 @@ function previewViewSize() {
   return [Math.max(2, Math.round(rect.width * dpr)), Math.max(2, Math.round(rect.height * dpr))];
 }
 
-const hdrCanvas = document.getElementById('view-hdr');
+let hdrCanvas = document.getElementById('view-hdr');
 const hdrNote = document.getElementById('hdr-note');
 const HDR_PEAK = 1000;
-let hdrCtx = null;
-let hdrKind = '';
+// { kind: 'gpu', device, ctx } for a WebGPU extended canvas, or { kind: 'pq', ctx, key } for a rec2100-pq 2D canvas.
+let hdrOut = null;
+let hdrProbe = null;
 
 function hdrScreen() {
   return window.matchMedia('(dynamic-range: high)').matches;
 }
 
-function hdrOptions() {
+async function gpuHdr() {
+  if (!navigator.gpu || typeof GPUTextureUsage === 'undefined') return null;
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) return null;
+    const device = await adapter.requestDevice();
+    const c = document.createElement('canvas');
+    const ctx = c.getContext('webgpu');
+    if (!ctx) { device.destroy(); return null; }
+    ctx.configure({
+      device,
+      format: 'rgba16float',
+      colorSpace: 'srgb',
+      alphaMode: 'opaque',
+      toneMapping: { mode: 'extended' },
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST,
+    });
+    const conf = ctx.getConfiguration && ctx.getConfiguration();
+    if (!conf || !conf.toneMapping || conf.toneMapping.mode !== 'extended') {
+      ctx.unconfigure();
+      device.destroy();
+      return null;
+    }
+    c.id = hdrCanvas.id;
+    c.hidden = true;
+    c.setAttribute('aria-hidden', 'true');
+    hdrCanvas.replaceWith(c);
+    hdrCanvas = c;
+    device.lost.then(() => {
+      if (hdrOut && hdrOut.device === device) { hdrOut = null; hdrProbe = null; hideHdr(); }
+    });
+    return { kind: 'gpu', device, ctx };
+  } catch (e) {
+    console.warn('Material Wizard: WebGPU HDR unavailable', e);
+    return null;
+  }
+}
+
+function pqHdr() {
+  if (typeof Float16Array === 'undefined') return null;
   const tries = [
     ['colorType', { colorSpace: 'rec2100-pq', colorType: 'float16' }],
     ['pixelFormat', { colorSpace: 'rec2100-pq', pixelFormat: 'float16' }],
@@ -1193,34 +1233,36 @@ function hdrOptions() {
   if (typeof off.configureHighDynamicRange === 'function') {
     try { off.configureHighDynamicRange({ mode: 'extended' }); } catch (e) { /* the context options carry it */ }
   }
-  for (const [kind, opt] of tries) {
+  for (const [key, opt] of tries) {
     try {
-      const ctx = off.getContext('2d', opt);
-      const attr = ctx && ctx.getContextAttributes && ctx.getContextAttributes();
+      const probe = off.getContext('2d', opt);
+      const attr = probe && probe.getContextAttributes && probe.getContextAttributes();
       const type = attr && (attr.colorType || attr.pixelFormat);
-      if (attr && attr.colorSpace === 'rec2100-pq' && type === 'float16') return [kind, opt];
+      if (!attr || attr.colorSpace !== 'rec2100-pq' || type !== 'float16') continue;
+      if (typeof hdrCanvas.configureHighDynamicRange === 'function') {
+        try { hdrCanvas.configureHighDynamicRange({ mode: 'extended' }); } catch (e) { /* the context options carry it */ }
+      }
+      const ctx = hdrCanvas.getContext('2d', opt);
+      return ctx ? { kind: 'pq', ctx, key } : null;
     } catch (e) { /* next */ }
   }
   return null;
 }
 
-function hdrContext() {
-  if (hdrCtx) return hdrCtx;
-  if (hdrKind === 'no' || typeof Float16Array === 'undefined') return null;
-  const found = hdrOptions();
-  if (!found) { hdrKind = 'no'; return null; }
-  if (typeof hdrCanvas.configureHighDynamicRange === 'function') {
-    try { hdrCanvas.configureHighDynamicRange({ mode: 'extended' }); } catch (e) { /* the context options carry it */ }
-  }
-  try { hdrCtx = hdrCanvas.getContext('2d', found[1]); } catch (e) { hdrCtx = null; }
-  if (!hdrCtx) { hdrKind = 'no'; return null; }
-  hdrKind = found[0];
-  return hdrCtx;
+// Returns the HDR output once it is known; the first call starts the probe and redraws when it finishes.
+function hdrReady() {
+  if (hdrOut || hdrProbe) return hdrOut;
+  hdrProbe = (async () => {
+    hdrOut = (await gpuHdr()) || pqHdr();
+    console.log('Material Wizard: HDR output', hdrOut ? hdrOut.kind : 'none');
+    if (hdrOut && original && viewSelect.value === 'preview') presentCurrent();
+  })();
+  return null;
 }
 
 let hdrBits = null;
 
-function float16Of(src) {
+function float16Bits(src) {
   if (!hdrBits || hdrBits.length !== src.length) hdrBits = new Uint16Array(src.length);
   const bits = hdrBits;
   const f = new Float32Array(1);
@@ -1233,20 +1275,14 @@ function float16Of(src) {
     if ((x & 0x7fffffff) > 0x477fe000) { bits[i] = sign | 0x7c00; continue; }
     bits[i] = sign | ((((x >>> 23) & 0xff) - 112) << 10) | ((x >>> 13) & 0x3ff);
   }
-  return new Float16Array(bits.buffer);
-}
-
-function hdrImage(data, w, h) {
-  const opt = { colorSpace: 'rec2100-pq' };
-  opt[hdrKind] = 'float16';
-  try { return new ImageData(float16Of(data), w, h, opt); } catch (e) { return null; }
+  return bits;
 }
 
 function hideHdr() {
   drop.classList.remove('is-hdr');
   hdrCanvas.hidden = true;
   hdrBits = null;
-  if (hdrCanvas.width) hdrCanvas.width = hdrCanvas.height = 0;
+  if (hdrCanvas.width > 1) hdrCanvas.width = hdrCanvas.height = 1;
 }
 
 function syncHdrNote() {
@@ -1256,15 +1292,31 @@ function syncHdrNote() {
 }
 
 function presentHdr(frame) {
-  const ctx = frame && hdrContext();
-  if (!ctx) { hideHdr(); return; }
+  if (!frame || !hdrOut) { hideHdr(); return; }
   if (hdrCanvas.width !== frame.w || hdrCanvas.height !== frame.h) {
     hdrCanvas.width = frame.w;
     hdrCanvas.height = frame.h;
   }
-  const image = hdrImage(frame.data, frame.w, frame.h);
-  if (!image) { hdrKind = 'no'; hdrCtx = null; hideHdr(); return; }
-  ctx.putImageData(image, 0, 0);
+  const bits = frame.half ? frame.data : float16Bits(frame.data);
+  try {
+    if (hdrOut.kind === 'gpu') {
+      hdrOut.device.queue.writeTexture(
+        { texture: hdrOut.ctx.getCurrentTexture() },
+        bits,
+        { bytesPerRow: frame.w * 8 },
+        { width: frame.w, height: frame.h },
+      );
+    } else {
+      const opt = { colorSpace: 'rec2100-pq' };
+      opt[hdrOut.key] = 'float16';
+      hdrOut.ctx.putImageData(new ImageData(new Float16Array(bits.buffer, bits.byteOffset, bits.length), frame.w, frame.h, opt), 0, 0);
+    }
+  } catch (e) {
+    console.warn('Material Wizard: HDR present failed', e);
+    hdrOut = null;
+    hideHdr();
+    return;
+  }
   hdrCanvas.hidden = false;
   drop.classList.add('is-hdr');
 }
@@ -1272,7 +1324,8 @@ function presentHdr(frame) {
 function presentCurrent() {
   const params = readParams();
   const preview = viewSelect.value === 'preview';
-  const hdr = preview && hdrScreen() && !!hdrContext() && !engine.hdrFailed();
+  const out = preview && hdrScreen() && !engine.hdrFailed() ? hdrReady() : null;
+  const hdr = out ? (out.kind === 'gpu' ? 'srgb' : 'pq') : null;
   engine.present(viewSelect.value, {
     split: params.split,
     layout: params.layoutPair,
@@ -1328,8 +1381,7 @@ function runEngine(size, tile, params) {
 
 function outputSize(sourceImage, tile, params) {
   const wanted = tile.pow2 && params.size === 'source' ? tile.pow2 : workingSize(sourceImage, params.size, params.pot);
-  const limit = params.size === 'source' ? Math.min(SOURCE_CAP, gpuLimit()) : gpuLimit();
-  return { wanted, size: capSize(wanted, limit) };
+  return { wanted, size: capSize(wanted, engine.maxSize()) };
 }
 
 // Runs fn with the engine at the output size, then goes back to the preview size.
@@ -1627,7 +1679,9 @@ function paintEditor() {
     view: tileView,
     cover: coverOn,
     seamLines: params.seamLines,
+    off: !tileActive(params),
     labels: {
+      off: text('tile.offNote'),
       beyond: { left: text('tile.beyondLeft'), right: text('tile.beyondRight'), up: text('tile.beyondUp'), down: text('tile.beyondDown') },
       size: text('tile.frameSize', { w: Math.round(frame.w * full.width), h: Math.round(frame.h * full.height) }),
     },
@@ -1791,7 +1845,6 @@ async function renderReady() {
   return false;
 }
 
-const SOURCE_CAP = 4096;
 let oomCap = Infinity;
 let oomInfo = null;
 let gpuLost = false;
@@ -1961,9 +2014,20 @@ document.querySelectorAll('[data-preset]').forEach((button) => {
 document.getElementById('pick-white').addEventListener('click', () => { pickWhite = true; });
 document.getElementById('clear-white').addEventListener('click', () => { remember(); whiteBalance = null; commit(); schedule(); });
 let panFrom = null;
+const touches = new Map();
+let pinch = null;
+function pinchState() {
+  const [a, b] = [...touches.values()];
+  return { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
 canvas.addEventListener('pointerdown', (event) => {
   if (event.button === 1) event.preventDefault();
   canvas.setPointerCapture(event.pointerId);
+  if (event.pointerType === 'touch') {
+    touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (touches.size === 2) { pinch = pinchState(); panFrom = null; return; }
+    if (touches.size > 2) return;
+  }
   panFrom = { x: event.clientX, y: event.clientY };
   if (viewZoom.zoom > 1 || viewSelect.value === 'preview') canvas.style.cursor = 'grabbing';
 });
@@ -1987,6 +2051,20 @@ function fittedSize() {
   return { w: canvas.width * fit, h: canvas.height * fit };
 }
 canvas.addEventListener('pointermove', (event) => {
+  if (touches.has(event.pointerId)) touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (pinch && touches.size >= 2) {
+    if (!original) return;
+    const now = pinchState();
+    if (viewZoom.zoom > 1) {
+      const fit = fittedSize();
+      viewZoom.x -= (now.x - pinch.x) / fit.w / viewZoom.zoom;
+      viewZoom.y += (now.y - pinch.y) / fit.h / viewZoom.zoom;
+      clampZoom();
+    }
+    setZoom(viewZoom.zoom * now.d / Math.max(1, pinch.d), viewUv({ clientX: now.x, clientY: now.y }));
+    pinch = now;
+    return;
+  }
   if (!event.buttons || pickWhite || !panFrom) return;
   const preview = viewSelect.value === 'preview';
   const lightDrag = event.buttons === 2 || event.shiftKey;
@@ -2011,7 +2089,14 @@ canvas.addEventListener('pointermove', (event) => {
   setSun(sunAngle.az + dx * 0.5, sunAngle.el - dy * 0.3);
   panFrom = { x: event.clientX, y: event.clientY };
 });
-function endPan() {
+function endPan(event) {
+  touches.delete(event.pointerId);
+  if (touches.size < 2) pinch = null;
+  if (touches.size === 1) {
+    const [rest] = touches.values();
+    panFrom = { x: rest.x, y: rest.y };
+    return;
+  }
   panFrom = null;
   canvas.style.cursor = viewZoom.zoom > 1 ? 'grab' : '';
 }

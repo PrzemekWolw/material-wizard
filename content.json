@@ -127,6 +127,7 @@
   "tile": {
     "title": "tile",
     "enable": "Tile this photo",
+    "offNote": "Tiling is off. Turn on Tile this photo to use the frame.",
     "intro": "Tiling stays off until you turn it on. Drag the orange frame on the photo to pick the tile, and drag a corner to resize it. Switch to tile repeated above the picture to check the seams.",
     "viewFrame": "frame on photo",
     "viewTiled": "tile repeated",
@@ -249,7 +250,7 @@
   "preview": {
     "title": "preview",
     "note": "Opens the lit view. Drag to turn the shape, Shift-drag or the right button to move the sun, scroll to zoom. Double-click resets the turn and the zoom. Middle-drag pans while zoomed in.",
-    "hint": "Drag turns the shape. Shift-drag or right-drag moves the sun. Scroll zooms. Double-click resets.",
+    "hint": "Drag turns the shape. Shift-drag or right-drag moves the sun. Scroll or pinch zooms. Double-click resets.",
     "zoomTip": "Scroll to zoom out or in. Double-click resets.",
     "sunTip": "Drag to place the sun. The centre is straight overhead, the bright ring is the horizon, and past it the sun sits below the horizon. The camera is at the bottom, so the top of the dial puts the sun in front of it. Scroll changes the height. Double-click resets.",
     "hdr": "The lit view is HDR on this screen. Highlights go up to {nits} nits."
@@ -293,7 +294,7 @@
     "objectSpace": "Loaded normal looks object-space. This tool expects a tangent-space normal.",
     "gpuCap": "The photo is {w} x {h}. Previewing at {sw} x {sh} so it fits in GPU memory.",
     "gpuOom": "The GPU ran out of memory at {size} px. Working at up to {cap} px instead.",
-    "exportCap": "Saved maps are {sw} x {sh}. The full size is {w} x {h}. Pick 8192 under Output size to try it.",
+    "exportCap": "Saved maps are {sw} x {sh}. The photo is {w} x {h}, which is larger than this GPU can hold.",
     "gpuLost": "The GPU ran out of memory and reset. Retrying at a smaller size.",
     "batchLine": "{name} — {files}",
     "batchWork": "{name} …",

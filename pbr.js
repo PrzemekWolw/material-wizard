@@ -956,7 +956,8 @@ void main() {
   o = vec4(presentSRGB(c), 1.0);
 }`,
 
-  // GT7 HDR curve, then PQ in Rec.2020. Frame-buffer scale stays 1 = 100 nits. The canvas is rec2100-pq.
+  // GT7 HDR curve. Frame-buffer scale stays 1 = 100 nits.
+  // uOut 0: PQ in Rec.2020 for a rec2100-pq canvas. uOut 1: extended sRGB with 1 = 250 nits paper white for a WebGPU extended canvas.
   litPq: `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -972,6 +973,7 @@ uniform float uToe;
 uniform float uKA;
 uniform float uKB;
 uniform float uKC;
+uniform float uOut;
 ${TONEMAP}
 float evalCurve(float x) {
   if (x < 0.0) return 0.0;
@@ -995,6 +997,11 @@ void main() {
   float chroma = 1.0 - smoothstep(0.98, 1.16, ucs.x / max(toIctcp(vec3(uPeak)).x, 1e-4));
   vec3 scaled = max(fromIctcp(vec3(toIctcp(skewed).x, ucs.yz * chroma)), 0.0);
   vec3 mapped = min(mix(skewed, scaled, 0.6), vec3(uPeak));
+  if (uOut > 0.5) {
+    vec3 rel = max(TO_709 * mapped, 0.0) / 2.5;
+    o = vec4(toSRGB(rel), 1.0);
+    return;
+  }
   o = vec4(pqFromNits(mapped * 100.0), 1.0);
 }`,
 
@@ -1774,7 +1781,8 @@ export function createEngine(canvas) {
 
   let hdrRaw = null;
   let hdrFlip = null;
-  function readHdr(lit, litU) {
+  // mode 'pq' or 'srgb' (see litPq). Returns rows top first, as half floats when the driver can read them directly.
+  function readHdr(lit, litU, mode) {
     const curve = hdrCurve(1000);
     const pq = rt('litPq', screenW, screenH, true);
     draw('litPq', pq, lit, {
@@ -1787,15 +1795,19 @@ export function createEngine(canvas) {
       uKA: curve.kA,
       uKB: curve.kB,
       uKC: curve.kC,
+      uOut: mode === 'srgb' ? 1 : 0,
     });
     gl.bindFramebuffer(gl.FRAMEBUFFER, pq.fb);
     gl.getError();
+    const half = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_FORMAT) === gl.RGBA
+      && gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE) === gl.HALF_FLOAT;
     const n = pq.w * pq.h * 4;
-    if (!hdrRaw || hdrRaw.length !== n) {
-      hdrRaw = new Float32Array(n);
-      hdrFlip = new Float32Array(n);
+    const Type = half ? Uint16Array : Float32Array;
+    if (!hdrRaw || hdrRaw.length !== n || !(hdrRaw instanceof Type)) {
+      hdrRaw = new Type(n);
+      hdrFlip = new Type(n);
     }
-    try { gl.readPixels(0, 0, pq.w, pq.h, gl.RGBA, gl.FLOAT, hdrRaw); }
+    try { gl.readPixels(0, 0, pq.w, pq.h, gl.RGBA, half ? gl.HALF_FLOAT : gl.FLOAT, hdrRaw); }
     catch (e) { hdrReadFailed = true; return null; }
     if (gl.getError()) {
       hdrReadFailed = true;
@@ -1803,7 +1815,7 @@ export function createEngine(canvas) {
     }
     const row = pq.w * 4;
     for (let y = 0; y < pq.h; y++) hdrFlip.set(hdrRaw.subarray(y * row, y * row + row), (pq.h - 1 - y) * row);
-    return { data: hdrFlip, w: pq.w, h: pq.h };
+    return { data: hdrFlip, half, w: pq.w, h: pq.h };
   }
 
   function dropLit() {
@@ -1904,7 +1916,7 @@ export function createEngine(canvas) {
         const lit = { uHdr: hdr, uBloom: bloom ? bloom.tex : hdr };
         const litU = { uBloomScale: bloom ? bloom.weight : 0, uExposure: scale };
         draw('litFinal', null, lit, litU);
-        hdrFrameBuf = params.hdr && !hdrReadFailed ? readHdr(lit, litU) : null;
+        hdrFrameBuf = params.hdr && !hdrReadFailed ? readHdr(lit, litU, params.hdr) : null;
       } else hdrFrameBuf = null;
       return;
     }
