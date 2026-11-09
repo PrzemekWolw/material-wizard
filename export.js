@@ -81,7 +81,11 @@ export function materialDocument(opts) {
     ambientOcclusionMap: folder + n + '_ao.dataR.png',
     roughnessFactor: round3(opts.roughnessFactor),
     metallicFactor: round3(opts.metallicFactor),
+    normalMapStrength: round3(opts.normalMapStrength),
+    opacityFactor: round3(opts.opacityFactor),
   };
+  const tint = opts.baseColorFactor;
+  if (tint && tint.some((v) => v < 0.999)) stage.baseColorFactor = [round3(tint[0]), round3(tint[1]), round3(tint[2]), 1];
   if (opts.includeOpacity) stage.opacityMap = folder + n + '_o.dataR.png';
   const mat = {
     name: n,

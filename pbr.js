@@ -16,6 +16,53 @@ vec2 uvOf(vec3 d) {
   return vec2(atan(d.x, d.z) / (2.0 * PI) + 0.5, clamp(asin(clamp(d.y, -1.0, 1.0)) / PI + 0.5, 0.002, 0.998));
 }`;
 
+const TONEMAP = `vec3 toSRGB(vec3 c) {
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
+  return mix(lo, hi, step(vec3(0.0031308), c));
+}
+// GT7 SDR tonemap
+// Input is frame-buffer scale (1.0 = 100 nits), paper white 250 nits.
+const mat3 TO_2020 = mat3(0.627404, 0.069097, 0.0163916, 0.329282, 0.919541, 0.0880132, 0.0433136, 0.0113612, 0.895595);
+const mat3 TO_709 = mat3(1.660496, -0.124547, -0.018154, -0.587656, 1.1329, -0.100597, -0.07284, -0.008352, 1.118751);
+float linToPq(float v) {
+  float ym = pow(max(v, 0.0) / 100.0, 0.1593017578125);
+  return exp2(78.84375 * (log2(0.8359375 + 18.8515625 * ym) - log2(1.0 + 18.6875 * ym)));
+}
+float pqToLin(float n) {
+  float np = pow(clamp(n, 0.0, 1.0), 1.0 / 78.84375);
+  float l = max(np - 0.8359375, 0.0) / (18.8515625 - 18.6875 * np);
+  return pow(l, 1.0 / 0.1593017578125) * 100.0;
+}
+vec3 toIctcp(vec3 c) {
+  vec3 lms = vec3(dot(c, vec3(1688.0, 2146.0, 262.0)), dot(c, vec3(683.0, 2951.0, 462.0)), dot(c, vec3(99.0, 309.0, 3688.0))) / 4096.0;
+  vec3 p = vec3(linToPq(lms.x), linToPq(lms.y), linToPq(lms.z));
+  return vec3(0.5 * (p.x + p.y), dot(p, vec3(6610.0, -13613.0, 7003.0)) / 4096.0, dot(p, vec3(17933.0, -17390.0, -543.0)) / 4096.0);
+}
+vec3 fromIctcp(vec3 i) {
+  vec3 lms = vec3(
+    pqToLin(i.x + 0.00860904 * i.y + 0.11103 * i.z),
+    pqToLin(i.x - 0.00860904 * i.y - 0.11103 * i.z),
+    pqToLin(i.x + 0.560031 * i.y - 0.320627 * i.z));
+  return max(vec3(
+    dot(lms, vec3(3.43661, -2.50645, 0.0698454)),
+    dot(lms, vec3(-0.79133, 1.9836, -0.192271)),
+    dot(lms, vec3(-0.0259499, -0.0989137, 1.12486))), 0.0);
+}
+float gtCurve(float x) {
+  if (x <= 0.0) return 0.0;
+  if (x >= 1.11) return 2.9633333 - 3.3733512 * exp(-0.5395683 * x);
+  return mix(0.538 * pow(x / 0.538, 1.28), x, smoothstep(0.0, 0.538, x));
+}
+vec3 tonemap(vec3 c709) {
+  vec3 c = max(TO_2020 * c709, 0.0);
+  vec3 ucs = toIctcp(c);
+  vec3 skewed = vec3(gtCurve(c.r), gtCurve(c.g), gtCurve(c.b));
+  float chroma = 1.0 - smoothstep(0.98, 1.16, ucs.x / 0.6025592);
+  vec3 scaled = fromIctcp(vec3(toIctcp(skewed).x, ucs.yz * chroma));
+  return TO_709 * (min(mix(skewed, scaled, 0.6), 2.5) / 2.5);
+}`;
+
 const ATMOSPHERE = `const float RE = 6371e3;
 const float RA = 6471e3;
 const vec3 BR = vec3(5.5e-6, 13.0e-6, 22.4e-6);
@@ -450,6 +497,7 @@ uniform float uRepeatY;
 uniform float uSeam;
 uniform float uZoom;
 uniform vec2 uCenter;
+uniform vec3 uMul;
 vec3 toSRGB(vec3 c) {
   vec3 lo = c * 12.92;
   vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
@@ -459,19 +507,12 @@ void main() {
   float zoom = max(uZoom, 1.0);
   vec2 q = (vUv - 0.5) / zoom + uCenter;
   vec2 uv = vec2(fract(q.x * uRepeatX), fract(q.y * uRepeatY));
-  vec4 c = texture(uTex, uv);
-  vec3 col = c.rgb;
-  if (uMode < 0.5) col = toSRGB(c.rgb);
-  else if (uMode < 1.5) col = c.rgb;
-  else col = vec3(c.r);
-  if (uSeam > 0.5) {
+  bool split = vUv.x < uSplit;
+  vec3 lin = split ? texture(uBefore, uv).rgb : texture(uTex, uv).rgb * uMul;
+  vec3 col = uMode < 0.5 ? toSRGB(lin) : (uMode < 1.5 ? lin : vec3(lin.r));
+  if (uSeam > 0.5 && !split) {
     float sx = min(fract(q.x * uRepeatX), fract(q.y * uRepeatY));
     if (sx < 0.012 / zoom) col = mix(col, vec3(0.95, 0.35, 0.13), 0.85);
-  }
-  if (vUv.x < uSplit) {
-    vec4 b = texture(uBefore, uv);
-    vec3 before = uMode < 0.5 ? toSRGB(b.rgb) : (uMode < 1.5 ? b.rgb : vec3(b.r));
-    col = before;
   }
   o = vec4(col, 1.0);
 }`,
@@ -575,7 +616,6 @@ uniform sampler2D uEnv4;
 uniform sampler2D uIrr;
 uniform vec3 uSun;
 uniform vec3 uSunColor;
-uniform float uExposure;
 uniform vec2 uRes;
 uniform vec2 uView;
 uniform mat3 uRot;
@@ -586,25 +626,17 @@ uniform float uSeam;
 uniform float uZoom;
 uniform vec2 uCenter;
 uniform float uSS;
+uniform float uDirect;
+uniform vec4 uFactor;
+uniform vec3 uTint;
 const float FOCAL = 3.0;
 ${EQUIRECT}
-vec3 toSRGB(vec3 c) {
-  vec3 lo = c * 12.92;
-  vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
-  return mix(lo, hi, step(vec3(0.0031308), c));
-}
-vec3 tonemap(vec3 c) {
-  float x = min(c.r, min(c.g, c.b));
-  float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
-  c -= offset;
-  float peak = max(c.r, max(c.g, c.b));
-  const float start = 0.76;
-  if (peak < start) return c;
-  const float d = 1.0 - start;
-  float next = 1.0 - d * d / (peak + d - start);
-  c *= next / peak;
-  float g = 1.0 - 1.0 / (0.15 * (peak - next) + 1.0);
-  return mix(c, vec3(next), g);
+${TONEMAP}
+// The game meters the frame and maps its average luminance to 0.7. Meter a mid grey ground instead.
+float autoExposure() {
+  vec3 sky = textureLod(uIrr, uvOf(vec3(0.0, 1.0, 0.0)), 0.0).rgb;
+  vec3 grey = 0.18 * (uSunColor * max(uSun.y, 0.0) / PI + sky);
+  return 0.7 / max(dot(grey, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
 }
 vec3 envLevel(float i, vec2 uv) {
   if (i < 0.5) return textureLod(uEnv0, uv, 0.0).rgb;
@@ -712,10 +744,11 @@ vec3 scene(vec2 s) {
   vec3 rd = normalize(vec3(s.x * viewA * fit, s.y * fit, -FOCAL));
   vec3 ro = vec3(0.0, 0.0, FOCAL);
   Hit h = trace(ro * uRot, rd * uRot);
+  float exposure = autoExposure();
   if (!h.ok) {
     vec3 sky = envLevel(0.0, uvOf(rd));
     sky += uSunColor * 400.0 * smoothstep(0.99996, 0.99999, dot(rd, uSun));
-    return tonemap(sky * uExposure);
+    return sky * exposure;
   }
   vec3 Ng = uRot * h.N;
   vec3 T = uRot * h.T;
@@ -725,21 +758,22 @@ vec3 scene(vec2 s) {
   float footprint = h.t * fit / (max(uZoom, 0.05) * uView.y * FOCAL);
   float lod = max(0.0, log2(footprint * inversesqrt(max(ndvg, 0.05)) / min(h.tw.x, h.tw.y)) - uSS);
   vec2 uv = h.uv * vec2(uRepeatX, uRepeatY);
-  vec3 alb = textureLod(uAlb, uv, lod).rgb;
+  vec3 alb = textureLod(uAlb, uv, lod).rgb * uTint;
   vec3 tn = textureLod(uN, uv, lod).rgb * 2.0 - 1.0;
-  float rough = textureLod(uR, uv, lod).r;
-  float metal = textureLod(uM, uv, lod).r;
+  // The game multiplies the maps by the material factors: roughness, metallic, opacity, normal strength (xy).
+  float rough = textureLod(uR, uv, lod).r * uFactor.x;
+  float metal = textureLod(uM, uv, lod).r * uFactor.y;
   float ao = textureLod(uAO, uv, lod).r;
-  float op = textureLod(uOp, uv, lod).r;
+  float op = textureLod(uOp, uv, lod).r * uFactor.z;
   float len = max(length(tn), 0.1);
   tn /= len;
+  tn = normalize(vec3(tn.xy * uFactor.w, tn.z));
   rough = clamp(sqrt(rough * rough + 0.5 * (1.0 - len) / len), 0.02, 1.0);
   vec3 n = normalize(T * tn.x + B * tn.y + Ng * tn.z);
   float ndv = max(dot(n, V), 1e-3);
   vec3 f0 = mix(vec3(0.04), alb, metal);
   vec2 ab = envAB(rough, ndv);
   vec3 fss = f0 * ab.x + ab.y;
-  vec3 energy = 1.0 + f0 * (1.0 / max(ab.x + ab.y, 1e-3) - 1.0);
 
   vec3 L = uSun;
   vec3 H = normalize(L + V);
@@ -756,24 +790,25 @@ vec3 scene(vec2 s) {
   float vis = 0.5 / max(gv + g2, 1e-5);
   vec3 fr = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
   float lit = smoothstep(0.0, 0.05, dot(Ng, L));
-  float directAo = mix(1.0, ao, 1.0 - smoothstep(0.0, 0.65, ndl));
-  vec3 E = uSunColor * lit * ndl * directAo;
-  vec3 spec = D * vis * fr * energy * E;
+  vec3 E = uSunColor * lit * ndl;
+  vec3 spec = D * vis * fr * E;
 
   vec3 R = reflect(-V, n);
-  float horizon = clamp(1.0 + dot(R, Ng), 0.0, 1.0);
-  float so = clamp(pow(ndv + ao, exp2(-16.0 * rough - 1.0)) - 1.0 + ao, 0.0, 1.0);
-  vec3 refl = specEnv(R, rough) * fss * energy * so * horizon * horizon;
-  vec3 kd = (1.0 - metal) * (1.0 - fss);
+  float horizon = clamp(1.0 + 1.3 * dot(R, Ng), 0.0, 1.0);
+  vec3 refl = specEnv(R, rough) * fss * ao * horizon * horizon;
   vec3 irr = textureLod(uIrr, uvOf(n), 0.0).rgb;
-  vec3 diffuse = alb * kd * (E / PI + irr * ao);
+  // Disney / Burley diffuse for the sun, the ambient term stays Lambert.
+  float f90 = 0.5 + 2.0 * rough * vdh * vdh;
+  float burley = (1.0 + (f90 - 1.0) * pow(1.0 - ndl, 5.0)) * (1.0 + (f90 - 1.0) * pow(1.0 - ndv, 5.0));
+  vec3 diffuse = alb * (1.0 - metal) * (E * burley / PI + irr * ao);
 
-  vec3 col = tonemap((diffuse + spec + refl) * uExposure);
-  vec3 checker = mod(floor(gl_FragCoord.x / 12.0) + floor(gl_FragCoord.y / 12.0), 2.0) < 0.5 ? vec3(0.02) : vec3(0.06);
+  // Exposed HDR, the checker and seam colours are picked to land at their old display values.
+  vec3 col = (diffuse + spec + refl) * exposure;
+  vec3 checker = mod(floor(gl_FragCoord.x / 12.0) + floor(gl_FragCoord.y / 12.0), 2.0) < 0.5 ? vec3(0.085) : vec3(0.2);
   col = mix(checker, col, op);
   if (uSeam > 0.5 && uShape < 0.5) {
     vec2 f = fract(uv);
-    if (min(f.x, f.y) < 0.012 / max(uZoom, 1.0)) col = mix(col, vec3(0.95, 0.35, 0.13), 0.75);
+    if (min(f.x, f.y) < 0.012 / max(uZoom, 1.0)) col = mix(col, vec3(1.9, 0.7, 0.26), 0.75);
   }
   return col;
 }
@@ -790,7 +825,69 @@ void main() {
     vec2 p = vUv + off.x * dx + off.y * dy;
     acc += scene((p - 0.5) / zoom + uCenter - 0.5);
   }
-  o = vec4(toSRGB(acc / count), 1.0);
+  vec3 hdr = min(acc / count, vec3(60000.0));
+  o = uDirect > 0.5 ? vec4(toSRGB(tonemap(hdr)), 1.0) : vec4(hdr, 1.0);
+}`,
+
+  // Karis average + quadratic threshold on the first downsample, 13 tap downsample after, tent upsample added back with blending.
+  bloomDown: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uFirst;
+vec3 tap(vec2 d) { return textureLod(uTex, vUv + d * uTexel, 0.0).rgb; }
+float wKaris(vec3 c) { return 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722))); }
+void main() {
+  if (uFirst > 0.5) {
+    vec3 a = tap(vec2(-1.0, -1.0));
+    vec3 b = tap(vec2(1.0, -1.0));
+    vec3 c = tap(vec2(-1.0, 1.0));
+    vec3 d = tap(vec2(1.0, 1.0));
+    float wa = wKaris(a), wb = wKaris(b), wc = wKaris(c), wd = wKaris(d);
+    vec3 avg = min((a * wa + b * wb + c * wc + d * wd) / (wa + wb + wc + wd), vec3(50.0));
+    const float th = 2.0;
+    const float knee = 0.1;
+    float bright = max(avg.r, max(avg.g, avg.b));
+    float rq = clamp(bright - (th - knee), 0.0, 2.0 * knee);
+    o = vec4(avg * max(0.25 / knee * rq * rq, bright - th) / max(bright, 0.001), 1.0);
+    return;
+  }
+  vec3 inner = tap(vec2(-0.5, -0.5)) + tap(vec2(0.5, -0.5)) + tap(vec2(-0.5, 0.5)) + tap(vec2(0.5, 0.5));
+  vec3 A = tap(vec2(-1.0, -1.0)), B = tap(vec2(0.0, -1.0)), C = tap(vec2(1.0, -1.0));
+  vec3 F = tap(vec2(-1.0, 0.0)), G = tap(vec2(0.0)), H = tap(vec2(1.0, 0.0));
+  vec3 K = tap(vec2(-1.0, 1.0)), L = tap(vec2(0.0, 1.0)), M = tap(vec2(1.0, 1.0));
+  vec3 outer = (A + B + G + F) + (B + C + H + G) + (F + G + L + K) + (G + H + M + L);
+  o = vec4(inner * 0.125 + outer * 0.03125, 1.0);
+}`,
+
+  bloomUp: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uWeight;
+vec3 tap(vec2 d) { return textureLod(uTex, vUv + d * uTexel, 0.0).rgb; }
+void main() {
+  vec3 s = tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0)) + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0));
+  s += 2.0 * (tap(vec2(0.0, -1.0)) + tap(vec2(-1.0, 0.0)) + tap(vec2(1.0, 0.0)) + tap(vec2(0.0, 1.0)));
+  s += 4.0 * tap(vec2(0.0));
+  o = vec4(s / 16.0 * uWeight, 1.0);
+}`,
+
+  litFinal: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uHdr;
+uniform sampler2D uBloom;
+uniform float uBloomScale;
+${TONEMAP}
+void main() {
+  vec3 c = textureLod(uHdr, vUv, 0.0).rgb + uBloomScale * textureLod(uBloom, vUv, 0.0).rgb;
+  o = vec4(toSRGB(tonemap(c)), 1.0);
 }`,
 };
 
@@ -881,6 +978,9 @@ export function createEngine(canvas) {
   const mipped = new Set();
   const used = new Set();
   let skyKey = '';
+  let skyUp = [0, 0, 0];
+  let factors = { roughness: 1, metallic: 1, opacity: 1, normal: 1 };
+  let tint = [1, 1, 1];
 
   let wrapS = gl.CLAMP_TO_EDGE;
   let wrapT = gl.CLAMP_TO_EDGE;
@@ -1122,6 +1222,7 @@ export function createEngine(canvas) {
   function update(params) {
     warnings.length = 0;
     if (!sourceTex || !width) return warnings;
+    factors = params.factors;
     wrapS = params.tileX ? gl.REPEAT : gl.CLAMP_TO_EDGE;
     wrapT = params.tileY ? gl.REPEAT : gl.CLAMP_TO_EDGE;
     used.clear();
@@ -1322,12 +1423,17 @@ export function createEngine(canvas) {
       });
     }
 
+    const rgb = params.flatColor || [1, 1, 1];
+    const lin = rgb.map((v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
     if (params.albedoMode === 'flat') {
       const flatAlbedo = rt('albedoF', width, height);
-      const lin = Math.pow(params.flatAlbedo, 2.2);
-      draw('fill', flatAlbedo, {}, { uColor: [lin, lin, lin, 1] });
+      draw('fill', flatAlbedo, {}, { uColor: [lin[0], lin[1], lin[2], 1] });
       finals.albedo = flatAlbedo;
-    } else finals.albedo = albedo;
+      tint = [1, 1, 1];
+    } else {
+      finals.albedo = albedo;
+      tint = lin;
+    }
     finals.height = heightMap;
     finals.normal = normal;
     finals.ao = ao;
@@ -1338,10 +1444,6 @@ export function createEngine(canvas) {
     finals.detail = detail;
     finals.photo = photo;
     finals.region = region;
-    const roughMean = meanOf(rough);
-    const metalMean = meanOf(metal);
-    finals.roughnessFactor = roughMean[0];
-    finals.metallicFactor = metalMean[0];
     rts.forEach((target, name) => {
       if (used.has(name) || name.startsWith('env')) return;
       gl.deleteTexture(target.tex);
@@ -1371,7 +1473,45 @@ export function createEngine(canvas) {
       draw('prefilter', out, { uEnv: env.uEnv0 }, { uEnvSize: [512, 256], uRough: (i + 1) / 4 });
     });
     draw('irradiance', env.uIrr, { uEnv: env.uEnv0 }, { uEnvSize: [512, 256] });
+    if (env.uIrr.float) {
+      const px = new Float32Array(4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, env.uIrr.fb);
+      gl.readPixels(0, env.uIrr.h - 1, 1, 1, gl.RGBA, gl.FLOAT, px);
+      skyUp = [px[0], px[1], px[2]];
+    }
     return env;
+  }
+
+  function exposureOf(sun, sunRgb) {
+    const grey = sunRgb.map((c, i) => 0.18 * (c * Math.max(sun[1], 0) / Math.PI + skyUp[i]));
+    return 0.7 / Math.max(0.2126 * grey[0] + 0.7152 * grey[1] + 0.0722 * grey[2], 1e-6);
+  }
+
+  // The preview sun is 22 against the game's 100000, so the EV is taken in game units.
+  function bloomChain(hdr, exposure) {
+    const ev = -Math.log2(exposure * 22 / 100000);
+    const aperture = 1.4 + Math.min(Math.max((ev + 5) / 20, 0), 1) * (22 - 1.4);
+    let count = Math.min(9, Math.max(1, Math.floor(Math.log2(Math.max(hdr.w, hdr.h)) + 1) - 2));
+    while (count > 1 && aperture * 0.5 <= count - 1) count--;
+    if (count < 2) return null;
+    const levels = [hdr];
+    for (let i = 1; i < count; i++) {
+      const src = levels[i - 1];
+      const dst = rt('bloom' + i, Math.max(1, hdr.w >> i), Math.max(1, hdr.h >> i), true);
+      draw('bloomDown', dst, { uTex: src }, { uTexel: [1 / src.w, 1 / src.h], uFirst: i === 1 ? 1 : 0 });
+      levels.push(dst);
+    }
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    for (let i = count - 1; i > 1; i--) {
+      const src = levels[i];
+      draw('bloomUp', levels[i - 1], { uTex: src }, {
+        uTexel: [1 / src.w, 1 / src.h],
+        uWeight: 0.7 * Math.min(Math.max(aperture * 0.5 - i, 0), 1),
+      });
+    }
+    gl.disable(gl.BLEND);
+    return { tex: levels[1], weight: 0.7 * Math.min(Math.max(aperture * 0.5 - 1, 0), 1) };
   }
 
   function layoutSize(repeat) {
@@ -1432,11 +1572,13 @@ export function createEngine(canvas) {
       const sunRgb = sunColor(sun);
       const env = bakeSky(sun, sunRgb);
       Object.assign(inputs, env);
-      const sunLum = 0.2126 * sunRgb[0] + 0.7152 * sunRgb[1] + 0.0722 * sunRgb[2];
-      draw('preview', null, inputs, {
+      const hdr = floatOk ? rt('litHdr', screenW, screenH, true) : null;
+      draw('preview', hdr, inputs, {
+        uDirect: hdr ? 0 : 1,
+        uFactor: [factors.roughness, factors.metallic, factors.opacity, factors.normal],
+        uTint: tint,
         uSun: sun,
         uSunColor: sunRgb,
-        uExposure: 1 / (0.25 * sunLum * Math.max(sun[1], 0.1) + 1.5),
         uRes: [width, height],
         uView: [screenW, screenH],
         uRot: params.rot || IDENTITY3,
@@ -1454,6 +1596,10 @@ export function createEngine(canvas) {
         gl.bindTexture(gl.TEXTURE_2D, inputs[key].tex);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       });
+      if (hdr) {
+        const bloom = bloomChain(hdr, exposureOf(sun, sunRgb));
+        draw('litFinal', null, { uHdr: hdr, uBloom: bloom ? bloom.tex : hdr }, { uBloomScale: bloom ? bloom.weight : 0 });
+      }
       return;
     }
     const chosen = map[view] || map.albedo;
@@ -1466,6 +1612,7 @@ export function createEngine(canvas) {
       uSeam: params.seamLines ? 1 : 0,
       uZoom: zoom,
       uCenter: center,
+      uMul: view === 'albedo' ? tint : [1, 1, 1],
     });
   }
 
@@ -1493,7 +1640,7 @@ export function createEngine(canvas) {
     if (!target) return null;
     if (name === 'albedo') {
       const shown = rt('tmpA', width, height);
-      draw('show', shown, { uTex: target, uBefore: target }, { uSplit: 0, uMode: 0, uRepeatX: 1, uRepeatY: 1, uSeam: 0, uZoom: 1, uCenter: [0.5, 0.5] });
+      draw('show', shown, { uTex: target, uBefore: target }, { uSplit: 0, uMode: 0, uRepeatX: 1, uRepeatY: 1, uSeam: 0, uZoom: 1, uCenter: [0.5, 0.5], uMul: [1, 1, 1] });
       return { rgba: read(shown), w: width, h: height };
     }
     return { rgba: read(target), w: width, h: height };
@@ -1526,7 +1673,6 @@ export function createEngine(canvas) {
   return {
     setSource, setLoaded, setMask, update, present, thumbnails, resize, readMap, warnings, release, maxSize,
     lost() { return gl.isContextLost(); },
-    factors() { return { roughnessFactor: finals.roughnessFactor || 0.5, metallicFactor: finals.metallicFactor || 0 }; },
     size() { return { w: width, h: height }; },
   };
 }

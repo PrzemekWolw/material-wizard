@@ -123,6 +123,14 @@ const SLOTS = [
   ['opacity', 1],
 ];
 
+// The game multiplies each of these maps by the material's factor (normal: scales the xy of the decoded normal).
+const FACTOR_SLOTS = {
+  normal: { copy: 'maps.strength', max: 2 },
+  roughness: { copy: 'maps.factor', max: 1 },
+  metallic: { copy: 'maps.factor', max: 1 },
+  opacity: { copy: 'maps.factor', max: 1 },
+};
+
 const canvas = document.getElementById('view');
 let engine = createEngine(canvas);
 const drop = document.getElementById('drop');
@@ -300,9 +308,15 @@ SLOTS.forEach(([name, flat]) => {
     + '<select data-slot-channel="' + name + '" data-title="maps.channel" title="' + text('maps.channel') + '"><option value="rgb">RGB</option><option value="luma">luma</option><option value="r"' + (COLOR_SLOTS.includes(name) ? '' : ' selected') + '>R</option><option value="g">G</option><option value="b">B</option><option value="a">A</option></select>'
     + '<label class="mw-check"><input type="checkbox" data-slot-invert="' + name + '"> <span data-copy="maps.invert">' + text('maps.invert') + '</span></label>'
     + '</div>'
-    + '<label class="mw-field" data-when="flat"><span data-copy="maps.value">' + text('maps.value') + '</span>'
-    + '<input type="range" data-slot-flat="' + name + '" min="0" max="1" step="0.01" value="' + flat + '">'
-    + '</label>'
+    + (name === 'albedo'
+      ? '<label class="mw-field" data-title="maps.colorTip" title="' + text('maps.colorTip') + '"><span data-copy="maps.color">' + text('maps.color') + '</span>'
+        + '<input type="color" data-slot-color="albedo" value="#ffffff"></label>'
+      : '<label class="mw-field" data-when="flat"><span data-copy="maps.value">' + text('maps.value') + '</span>'
+        + '<input type="range" data-slot-flat="' + name + '" min="0" max="1" step="0.01" value="' + flat + '"></label>')
+    + (FACTOR_SLOTS[name]
+      ? '<label class="mw-field" data-title="maps.factorTip" title="' + text('maps.factorTip') + '"><span data-copy="' + FACTOR_SLOTS[name].copy + '">' + text(FACTOR_SLOTS[name].copy) + '</span>'
+        + '<input type="range" data-slot-factor="' + name + '" min="0" max="' + FACTOR_SLOTS[name].max + '" step="0.01" value="1"></label>'
+      : '')
     + '</div>';
   slotHost.appendChild(box);
   const c = thumbCanvas();
@@ -434,6 +448,12 @@ function num(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function hexColor(value) {
+  const n = parseInt(String(value || '').replace('#', ''), 16);
+  if (!Number.isFinite(n)) return [1, 1, 1];
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
 function readParams() {
   const params = {
     delight: 0.65, highlight: 0.8, relief: 0, targetMean: 0.18,
@@ -468,7 +488,9 @@ function readParams() {
   params.regionClass = [0, 1, 2, 3].map((i) => document.querySelector('[data-region-class="' + i + '"]').value);
   params.regionMetal = [0, 1, 2, 3].map((i) => num(document.querySelector('[data-region-metal="' + i + '"]').value, 0));
   const flatOf = (slot) => num(document.querySelector('[data-slot-flat="' + slot + '"]').value, 0.5);
-  params.flatAlbedo = flatOf('albedo');
+  params.flatColor = hexColor(document.querySelector('[data-slot-color="albedo"]').value);
+  const factorOf = (slot) => num(document.querySelector('[data-slot-factor="' + slot + '"]').value, 1);
+  params.factors = { normal: factorOf('normal'), roughness: factorOf('roughness'), metallic: factorOf('metallic'), opacity: factorOf('opacity') };
   params.flatHeight = flatOf('height');
   params.flatAo = flatOf('ao');
   params.flatRough = flatOf('roughness');
@@ -496,7 +518,7 @@ function readParams() {
 let whiteBalance = null;
 
 const HISTORY_LIMIT = 30;
-const HISTORY_CONTROL = '[data-param], [data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-region-class], [data-region-metal], #quad, #orm-order';
+const HISTORY_CONTROL = '[data-param], [data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-slot-color], [data-slot-factor], [data-region-class], [data-region-metal], #quad, #orm-order';
 const undoStack = [];
 const redoStack = [];
 let restoring = false;
@@ -657,15 +679,25 @@ function controlValue(el) {
   return el.type === 'checkbox' ? el.checked : el.value;
 }
 
+const SLOT_CONTROLS = '[data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-slot-color], [data-slot-factor]';
+
+function slotControlKey(el) {
+  const d = el.dataset;
+  if (d.slotMode != null) return 'mode:' + d.slotMode;
+  if (d.slotChannel != null) return 'channel:' + d.slotChannel;
+  if (d.slotInvert != null) return 'invert:' + d.slotInvert;
+  if (d.slotColor != null) return 'color:' + d.slotColor;
+  if (d.slotFactor != null) return 'factor:' + d.slotFactor;
+  return 'flat:' + d.slotFlat;
+}
+
 function readPreset() {
   const values = {};
   document.querySelectorAll('[data-param]').forEach((el) => {
     if (!PRESET_SKIP.has(el.dataset.param)) values['p:' + el.dataset.param] = controlValue(el);
   });
-  document.querySelectorAll('[data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat]').forEach((el) => {
-    const kind = el.dataset.slotMode != null ? 'mode' : el.dataset.slotChannel != null ? 'channel' : el.dataset.slotInvert != null ? 'invert' : 'flat';
-    const name = el.dataset.slotMode || el.dataset.slotChannel || el.dataset.slotInvert || el.dataset.slotFlat;
-    values['s:' + kind + ':' + name] = controlValue(el);
+  document.querySelectorAll(SLOT_CONTROLS).forEach((el) => {
+    values['s:' + slotControlKey(el)] = controlValue(el);
   });
   document.querySelectorAll('[data-region-class], [data-region-metal]').forEach((el) => {
     const kind = el.dataset.regionClass != null ? 'class' : 'metal';
@@ -678,10 +710,8 @@ function readPreset() {
 
 function writePreset(values) {
   document.querySelectorAll('[data-param]').forEach((el) => setControl(el, values['p:' + el.dataset.param]));
-  document.querySelectorAll('[data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat]').forEach((el) => {
-    const kind = el.dataset.slotMode != null ? 'mode' : el.dataset.slotChannel != null ? 'channel' : el.dataset.slotInvert != null ? 'invert' : 'flat';
-    const name = el.dataset.slotMode || el.dataset.slotChannel || el.dataset.slotInvert || el.dataset.slotFlat;
-    setControl(el, values['s:' + kind + ':' + name]);
+  document.querySelectorAll(SLOT_CONTROLS).forEach((el) => {
+    setControl(el, values['s:' + slotControlKey(el)]);
   });
   document.querySelectorAll('[data-region-class], [data-region-metal]').forEach((el) => {
     const kind = el.dataset.regionClass != null ? 'class' : 'metal';
@@ -1077,11 +1107,11 @@ async function render() {
   lastRender = { tile };
   drawThumbnails();
   presentCurrent();
-  const factors = engine.factors();
   const length = textureLengthFor(params.roadWidth, work.w, work.h);
+  const factorVars = { rough: params.factors.roughness.toFixed(2), metal: params.factors.metallic.toFixed(2) };
   document.getElementById('scale-note').textContent = params.profile === 'road' || !params.tileX
-    ? text('notes.road', { width: params.roadWidth, length: length.toFixed(2), rough: factors.roughnessFactor.toFixed(2), metal: factors.metallicFactor.toFixed(2) })
-    : text('notes.factors', { rough: factors.roughnessFactor.toFixed(2), metal: factors.metallicFactor.toFixed(2) });
+    ? text('notes.road', { width: params.roadWidth, length: length.toFixed(2), ...factorVars })
+    : text('notes.factors', factorVars);
   warningsEl.innerHTML = '';
   notes.concat(warnings).forEach((line) => {
     const p = document.createElement('p');
@@ -1491,7 +1521,7 @@ document.body.addEventListener('input', (event) => {
     shapeSelect.disabled = event.target.value === 'source' && !detected;
     return;
   }
-  if (event.target.matches('[data-param], [data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-region-class], [data-region-metal]')) {
+  if (event.target.matches('[data-param], [data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-slot-color], [data-slot-factor], [data-region-class], [data-region-metal]')) {
     schedule();
     refreshEditor();
   }
@@ -1871,10 +1901,9 @@ async function filesForCurrent(subfolder) {
   if (params.profile === 'road' || params.opacityMode === 'load' || shapedOpacity) {
     names.push(['opacity', params.name + '_o.dataR.png']);
   }
-  const { size, images, factors } = await atOutputSize((at) => ({
+  const { size, images } = await atOutputSize((at) => ({
     size: at,
     images: names.map(([key]) => engine.readMap(key)),
-    factors: engine.factors(),
   }));
   const files = [];
   for (let i = 0; i < names.length; i++) {
@@ -1886,8 +1915,11 @@ async function filesForCurrent(subfolder) {
     profile: params.profile,
     annotation: params.annotation,
     alphaRef: params.alphaRef,
-    roughnessFactor: factors.roughnessFactor,
-    metallicFactor: factors.metallicFactor,
+    roughnessFactor: params.factors.roughness,
+    metallicFactor: params.factors.metallic,
+    opacityFactor: params.factors.opacity,
+    normalMapStrength: params.factors.normal,
+    baseColorFactor: params.albedoMode === 'flat' ? null : params.flatColor,
     includeOpacity: names.some((entry) => entry[0] === 'opacity'),
   }), null, 2);
   files.push({ name: prefix + 'main.materials.json', data: new TextEncoder().encode(json) });

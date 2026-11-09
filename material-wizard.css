@@ -285,6 +285,8 @@ body.mw-resizing { cursor: col-resize; user-select: none; }
 
 .mw-field input[type="range"] { grid-column: 1 / -1; }
 
+.mw-field input[type="color"] { width: 48px; height: 28px; padding: 2px; border: 2px solid var(--mw-field-line); background: var(--mw-field); cursor: pointer; }
+
 .mw-field.full { grid-template-columns: 1fr; }
 
 .mw-field input[type="text"], .mw-field input[type="number"], .mw-text input[type="text"] { width: 100%; }
