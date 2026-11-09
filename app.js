@@ -441,7 +441,7 @@ function readParams() {
     normalStrength: 1, normalSmooth: 0.5, flipY: false, aoDepth: 1, aoContrast: 1, metalWear: 0, metalSharp: 1,
     detailStrength: 0.7, detailCutoff: 0.65, detailAuto: true, detailFlatOnly: 0.35, atlas: false, addDetail: false,
     addAoDetail: false, aoDetailAmount: 1, addRoughDetail: false, roughDetailAmount: 1, addMetalDetail: false, metalDetailAmount: 1, mapDetailSize: 0.5,
-    tileLeft: true, tileRight: false, tileUp: true, tileDown: false,
+    tileOn: false, tileLeft: true, tileRight: false, tileUp: true, tileDown: false,
     leftA: 0.03, leftB: 0.2, rightA: 0.03, rightB: 0.2, upA: 0.03, upB: 0.2, downA: 0.03, downB: 0.2,
     tileBlend: 'cut', tileSoft: 0.3, crop: '', cropShape: 'auto', roadRuns: 'up', roadWidth: 7,
     cavityRough: 0.25, wearRough: 0.1, microRough: 0.15, specRough: 0.35, nvarRough: 0.2,
@@ -1154,7 +1154,7 @@ function currentFrame(params, w, h) {
 }
 
 function tileActive(params) {
-  return params.tileX || params.tileY || !!parseFrame(params.crop);
+  return !!params.tileOn;
 }
 
 function tileOpts(params) {
@@ -1500,11 +1500,24 @@ document.body.addEventListener('change', async (event) => {
   const input = event.target.closest('[data-slot-file]');
   if (!input || !input.files[0]) return;
   remember();
-  slotImages[input.dataset.slotFile] = await loadImage(input.files[0]);
-  document.querySelector('[data-file-name="' + input.dataset.slotFile + '"]').textContent = input.files[0].name;
-  document.querySelector('[data-slot-mode="' + input.dataset.slotFile + '"]').value = 'load';
+  const slot = input.dataset.slotFile;
+  const image = await loadImage(input.files[0]);
+  if (slot === 'albedo') {
+    SLOTS.forEach(([name]) => {
+      if (name === 'albedo') return;
+      delete slotImages[name];
+      setSlotMode(name, 'generate');
+      document.querySelector('[data-file-name="' + name + '"]').textContent = text('maps.choose');
+    });
+    original = image;
+    cropInput.value = '';
+    setNameFrom(input.files[0]);
+  }
+  slotImages[slot] = image;
+  document.querySelector('[data-file-name="' + slot + '"]').textContent = input.files[0].name;
+  document.querySelector('[data-slot-mode="' + slot + '"]').value = 'load';
   if (!original) {
-    original = slotImages[input.dataset.slotFile];
+    original = image;
     setNameFrom(input.files[0]);
   }
   commit();
@@ -1566,12 +1579,13 @@ document.querySelectorAll('[data-preset]').forEach((button) => {
     const profile = document.querySelector('[data-param="profile"]');
     const edge = document.querySelector('[data-param="opacityEdge"]');
     remember();
+    document.querySelector('[data-param="tileOn"]').checked = true;
     side('Right', false);
     side('Down', false);
     side('Left', kind === 'surface');
-    side('Up', kind !== 'decal');
+    side('Up', true);
     profile.value = kind === 'surface' ? 'level' : 'road';
-    edge.value = kind === 'surface' ? 0 : kind === 'road' ? 0.18 : 0.08;
+    edge.value = kind === 'surface' ? 0 : 0.18;
     cropInput.value = '';
     commit();
     schedule();
@@ -1726,6 +1740,7 @@ function showRepeat() {
     const w = repeatInfo.cropW / repeatSize.w;
     const h = repeatInfo.cropH / repeatSize.h;
     document.querySelector('[data-param="cropShape"]').value = 'free';
+    document.querySelector('[data-param="tileOn"]').checked = true;
     cropInput.value = frameString({ x: (1 - w) / 2, y: (1 - h) / 2, w, h });
     fixTools.open = false;
     commit();
@@ -1848,13 +1863,13 @@ async function filesForCurrent(subfolder) {
   const names = [
     ['albedo', params.name + '_b.color.png'],
     ['normal', params.name + '_nm.normal.png'],
-    ['rough', params.name + '_r.data.png'],
-    ['metal', params.name + '_m.data.png'],
-    ['ao', params.name + '_ao.data.png'],
+    ['rough', params.name + '_r.dataR.png'],
+    ['metal', params.name + '_m.dataR.png'],
+    ['ao', params.name + '_ao.dataR.png'],
   ];
   const shapedOpacity = params.opacityEdge > 0 || params.opacityPatch > 0 || params.opacityCrack > 0 || params.opacityRegion >= 0;
   if (params.profile === 'road' || params.opacityMode === 'load' || shapedOpacity) {
-    names.push(['opacity', params.name + '_o.data.png']);
+    names.push(['opacity', params.name + '_o.dataR.png']);
   }
   const { size, images, factors } = await atOutputSize((at) => ({
     size: at,
@@ -1888,12 +1903,12 @@ async function filesForCurrent(subfolder) {
 
 const SAVE = {
   albedo: ['albedo', '_b.color.png', 'Base color'],
-  height: ['height', '_h.data.png', 'Height'],
+  height: ['height', '_h.dataR.png', 'Height'],
   normal: ['normal', '_nm.normal.png', 'Normal'],
-  roughness: ['rough', '_r.data.png', 'Roughness'],
-  metallic: ['metal', '_m.data.png', 'Metallic'],
-  ao: ['ao', '_ao.data.png', 'AO'],
-  opacity: ['opacity', '_o.data.png', 'Opacity'],
+  roughness: ['rough', '_r.dataR.png', 'Roughness'],
+  metallic: ['metal', '_m.dataR.png', 'Metallic'],
+  ao: ['ao', '_ao.dataR.png', 'AO'],
+  opacity: ['opacity', '_o.dataR.png', 'Opacity'],
 };
 const saveHost = document.getElementById('save-maps');
 Object.keys(SAVE).forEach((slot) => {
@@ -1923,10 +1938,10 @@ function classify(filename) {
   const rules = [
     [/_b\.color$/i, 'albedo'],
     [/_nm\.normal$/i, 'normal'],
-    [/_r\.data$/i, 'roughness'],
-    [/_m\.data$/i, 'metallic'],
-    [/_ao\.data$/i, 'ao'],
-    [/_o\.data$/i, 'opacity'],
+    [/_r\.dataR?$/i, 'roughness'],
+    [/_m\.dataR?$/i, 'metallic'],
+    [/_ao\.dataR?$/i, 'ao'],
+    [/_o\.dataR?$/i, 'opacity'],
     [/(basecolor|albedo|diffuse|_color)$/i, 'albedo'],
     [/(normal|nrm|_normal)$/i, 'normal'],
     [/(height|displacement|disp)$/i, 'height'],

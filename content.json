@@ -120,7 +120,8 @@
   },
   "tile": {
     "title": "tile",
-    "intro": "Drag the orange frame on the photo to pick the tile, and drag a corner to resize it. Click the small square, or switch to tile repeated above the picture, to check the seams.",
+    "enable": "Tile this photo",
+    "intro": "Tiling stays off until you turn it on. Drag the orange frame on the photo to pick the tile, and drag a corner to resize it. Click the small square, or switch to tile repeated above the picture, to check the seams.",
     "viewFrame": "frame on photo",
     "viewTiled": "tile repeated",
     "zoomTip": "Scroll to zoom. Drag empty space, or the right mouse button, to move the picture. Double-click to reset.",
@@ -139,7 +140,6 @@
     "inset": "repeated, click to enlarge",
     "surface": "Surface",
     "roadPreset": "Road",
-    "decal": "Single decal",
     "frame": "Frame",
     "frameAuto": "auto",
     "frameFree": "free",

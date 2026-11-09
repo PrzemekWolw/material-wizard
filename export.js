@@ -76,13 +76,13 @@ export function materialDocument(opts) {
   const stage = {
     baseColorMap: folder + n + '_b.color.png',
     normalMap: folder + n + '_nm.normal.png',
-    roughnessMap: folder + n + '_r.data.png',
-    metallicMap: folder + n + '_m.data.png',
-    ambientOcclusionMap: folder + n + '_ao.data.png',
+    roughnessMap: folder + n + '_r.dataR.png',
+    metallicMap: folder + n + '_m.dataR.png',
+    ambientOcclusionMap: folder + n + '_ao.dataR.png',
     roughnessFactor: round3(opts.roughnessFactor),
     metallicFactor: round3(opts.metallicFactor),
   };
-  if (opts.includeOpacity) stage.opacityMap = folder + n + '_o.data.png';
+  if (opts.includeOpacity) stage.opacityMap = folder + n + '_o.dataR.png';
   const mat = {
     name: n,
     mapTo: n,
