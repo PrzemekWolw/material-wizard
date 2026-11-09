@@ -226,6 +226,8 @@
   "preview.note": "Abre la vista iluminada. Arrastra para girar la forma, arrastra con Mayús o el botón derecho para mover el sol, la rueda acerca y aleja. Doble clic restablece el giro y el zoom. Con zoom, el botón central desplaza la vista.",
   "preview.hint": "Arrastrar gira la forma. Mayús o el botón derecho mueve el sol. La rueda hace zoom. Doble clic restablece.",
   "preview.zoomTip": "La rueda acerca y aleja. Doble clic restablece.",
+  "preview.sunTip": "Arrastra para colocar el sol. El centro es justo encima, el anillo brillante es el horizonte y más allá el sol queda bajo el horizonte. La cámara está abajo, así que la parte de arriba pone el sol delante de ella. La rueda cambia la altura. Doble clic para restablecer.",
+  "preview.hdr": "La vista iluminada es HDR en esta pantalla. Los brillos llegan hasta {nits} nits.",
   "export.title": "exportar",
   "export.name": "Nombre del material",
   "export.nameNote": "El nombre viene de la foto que abres. Da nombre al zip y a cada mapa guardado.",

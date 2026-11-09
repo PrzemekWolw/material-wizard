@@ -110,6 +110,7 @@ function refreshLanguage() {
   drawLights();
   refreshEditor();
   if (original && !gpuLost) schedule();
+  syncHdrNote();
 }
 
 const COLOR_SLOTS = ['albedo', 'normal'];
@@ -142,7 +143,121 @@ let repeatSize = null;
 let lights = [];
 let lightQueue = null;
 let timer = 0;
-const lightPointer = { x: 0.3, y: 0.4 };
+let tileIdle = 0;
+const sunAngle = { az: 25, el: 30 };
+const sunDial = document.getElementById('sun-dial');
+const DIAL = 128;
+const SUN_EL_MIN = -45;
+const HORIZON_R = 0.78;
+let dialDragging = false;
+
+function setSun(az, el) {
+  sunAngle.az = ((az % 360) + 360) % 360;
+  sunAngle.el = Math.max(SUN_EL_MIN, Math.min(90, el));
+  drawSunDial();
+  presentCurrent();
+}
+
+function dialRadius(el, R) {
+  const h = R * HORIZON_R;
+  if (el >= 0) return h * (1 - el / 90);
+  return h + (R - h) * (el / SUN_EL_MIN);
+}
+
+// Seen from above: the centre is overhead, the bright ring is the horizon, the camera sits at the bottom.
+function drawSunDial() {
+  if (sunDial.hidden) return;
+  const dpr = window.devicePixelRatio || 1;
+  const px = Math.round(DIAL * dpr);
+  if (sunDial.width !== px) { sunDial.width = px; sunDial.height = px; }
+  const ctx = sunDial.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, DIAL, DIAL);
+  const c = DIAL / 2;
+  const R = c - 14;
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#f15a22';
+  const hR = R * HORIZON_R;
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.beginPath();
+  ctx.arc(c, c, c - 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.beginPath();
+  ctx.arc(c, c, hR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1;
+  [2 / 3, 1 / 3].forEach((k) => {
+    ctx.beginPath();
+    ctx.arc(c, c, hR * k, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.beginPath();
+  ctx.moveTo(c - hR, c); ctx.lineTo(c + hR, c);
+  ctx.moveTo(c, c - hR); ctx.lineTo(c, c + hR);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(c, c, hR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.beginPath();
+  ctx.moveTo(c, c + R - 10);
+  ctx.lineTo(c - 7, c + R + 6);
+  ctx.lineTo(c + 7, c + R + 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(c - 4, c - 4, 8, 8);
+  const az = sunAngle.az * Math.PI / 180;
+  const r = dialRadius(sunAngle.el, R);
+  const sx = c + r * Math.sin(az);
+  const sy = c + r * Math.cos(az);
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(c, c); ctx.lineTo(sx, sy);
+  ctx.stroke();
+  ctx.fillStyle = '#ffd34d';
+  ctx.beginPath();
+  ctx.arc(sx, sy, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = accent;
+  ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = '600 10px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(Math.round(sunAngle.az) + '° / ' + Math.round(sunAngle.el) + '°', c, 11);
+}
+
+function dialSun(event) {
+  const rect = sunDial.getBoundingClientRect();
+  const x = event.clientX - rect.left - rect.width / 2;
+  const y = event.clientY - rect.top - rect.height / 2;
+  const R = rect.width / 2 - 14 * rect.width / DIAL;
+  const h = R * HORIZON_R;
+  const d = Math.hypot(x, y);
+  const el = d <= h ? 90 * (1 - d / h) : SUN_EL_MIN * Math.min(1, (d - h) / Math.max(1, R - h));
+  setSun(Math.atan2(x, y) * 180 / Math.PI, el);
+}
+
+sunDial.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  sunDial.setPointerCapture(event.pointerId);
+  dialDragging = true;
+  dialSun(event);
+});
+sunDial.addEventListener('pointermove', (event) => { if (dialDragging) dialSun(event); });
+const endDial = () => { dialDragging = false; };
+sunDial.addEventListener('pointerup', endDial);
+sunDial.addEventListener('pointercancel', endDial);
+sunDial.addEventListener('dblclick', (event) => { event.stopPropagation(); setSun(25, 30); });
+sunDial.addEventListener('wheel', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  setSun(sunAngle.az, sunAngle.el + (event.deltaY < 0 ? 3 : -3));
+}, { passive: false });
 
 const root = document.documentElement;
 const themeKey = 'theme';
@@ -336,6 +451,8 @@ function showView(view) {
   zoomInput.title = text(zoomInput.dataset.title);
   const tip = document.getElementById('lit-tip');
   if (tip) tip.hidden = view !== 'preview';
+  sunDial.hidden = view !== 'preview';
+  drawSunDial();
   syncViewButtons();
   if (viewZoom.zoom < zoomMin()) setZoom(viewZoom.zoom);
   else presentCurrent();
@@ -482,6 +599,7 @@ for (let i = 0; i < 4; i++) {
 document.getElementById('tabs').addEventListener('click', (event) => {
   const button = event.target.closest('[data-tab]');
   if (!button) return;
+  const wasTile = document.querySelector('[data-tab].is-active').dataset.tab === 'tile';
   document.querySelectorAll('[data-tab]').forEach((el) => el.classList.toggle('is-active', el === button));
   document.querySelectorAll('[data-panel]').forEach((panel) => {
     const show = panel.getAttribute('data-panel') === button.dataset.tab;
@@ -489,6 +607,7 @@ document.getElementById('tabs').addEventListener('click', (event) => {
     if (show) enterContent(panel);
   });
   if (button.dataset.tab === 'preview') showView('preview');
+  if (wasTile && button.dataset.tab !== 'tile') flushTileWork();
   refreshEditor();
 });
 
@@ -554,7 +673,7 @@ function readParams() {
   params.flatOpacity = flatOf('opacity');
   const layout = String(params.layout).split('x').map((n) => num(n, 1));
   params.layoutPair = layout;
-  params.light = [lightPointer.x, lightPointer.y];
+  params.light = [sunAngle.az, sunAngle.el];
   SLOTS.forEach(([name]) => {
     const mode = document.querySelector('[data-slot-mode="' + name + '"]').value;
     const key = name === 'albedo' ? 'albedoMode'
@@ -856,6 +975,29 @@ function schedule() {
   paintRanges();
 }
 
+// Tile drags only refresh the base-color preview. The other maps are built after the edit pauses.
+const TILE_EDIT = new Set([
+  'crop', 'cropShape', 'tileOn', 'tileLeft', 'tileRight', 'tileUp', 'tileDown',
+  'tileBlend', 'tileSoft', 'roadRuns', 'roadWidth', 'seamLines',
+  'leftA', 'leftB', 'rightA', 'rightB', 'upA', 'upB', 'downA', 'downB',
+]);
+const TILE_IDLE = 2000;
+
+function scheduleTileWork() {
+  clearTimeout(tileIdle);
+  tileIdle = setTimeout(() => {
+    tileIdle = 0;
+    schedule();
+  }, TILE_IDLE);
+}
+
+function flushTileWork() {
+  if (!tileIdle) return;
+  clearTimeout(tileIdle);
+  tileIdle = 0;
+  schedule();
+}
+
 function canvasFromRGBA(rgba, w, h) {
   const c = document.createElement('canvas');
   c.width = w;
@@ -864,13 +1006,15 @@ function canvasFromRGBA(rgba, w, h) {
   return c;
 }
 
-function imageDataOf(image) {
+function imageDataOf(image, w = image.width, h = image.height) {
   const c = document.createElement('canvas');
-  c.width = image.width;
-  c.height = image.height;
+  c.width = w;
+  c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(image, 0, 0);
-  return ctx.getImageData(0, 0, c.width, c.height);
+  ctx.drawImage(image, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, c.width, c.height);
+  c.width = c.height = 0;
+  return data;
 }
 
 function extract(image, channel, invert) {
@@ -956,6 +1100,11 @@ function paint(image, w, h) {
   return c;
 }
 
+function uploadPainted(set, image, w, h) {
+  const c = paint(image, w, h);
+  try { set(c); } finally { c.width = c.height = 0; }
+}
+
 function loadImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -1025,8 +1174,105 @@ function previewViewSize() {
   return [Math.max(2, Math.round(rect.width * dpr)), Math.max(2, Math.round(rect.height * dpr))];
 }
 
+const hdrCanvas = document.getElementById('view-hdr');
+const hdrNote = document.getElementById('hdr-note');
+const HDR_PEAK = 1000;
+let hdrCtx = null;
+let hdrKind = '';
+
+function hdrScreen() {
+  return window.matchMedia('(dynamic-range: high)').matches;
+}
+
+function hdrOptions() {
+  const tries = [
+    ['colorType', { colorSpace: 'rec2100-pq', colorType: 'float16' }],
+    ['pixelFormat', { colorSpace: 'rec2100-pq', pixelFormat: 'float16' }],
+  ];
+  const off = document.createElement('canvas');
+  if (typeof off.configureHighDynamicRange === 'function') {
+    try { off.configureHighDynamicRange({ mode: 'extended' }); } catch (e) { /* the context options carry it */ }
+  }
+  for (const [kind, opt] of tries) {
+    try {
+      const ctx = off.getContext('2d', opt);
+      const attr = ctx && ctx.getContextAttributes && ctx.getContextAttributes();
+      const type = attr && (attr.colorType || attr.pixelFormat);
+      if (attr && attr.colorSpace === 'rec2100-pq' && type === 'float16') return [kind, opt];
+    } catch (e) { /* next */ }
+  }
+  return null;
+}
+
+function hdrContext() {
+  if (hdrCtx) return hdrCtx;
+  if (hdrKind === 'no' || typeof Float16Array === 'undefined') return null;
+  const found = hdrOptions();
+  if (!found) { hdrKind = 'no'; return null; }
+  if (typeof hdrCanvas.configureHighDynamicRange === 'function') {
+    try { hdrCanvas.configureHighDynamicRange({ mode: 'extended' }); } catch (e) { /* the context options carry it */ }
+  }
+  try { hdrCtx = hdrCanvas.getContext('2d', found[1]); } catch (e) { hdrCtx = null; }
+  if (!hdrCtx) { hdrKind = 'no'; return null; }
+  hdrKind = found[0];
+  return hdrCtx;
+}
+
+let hdrBits = null;
+
+function float16Of(src) {
+  if (!hdrBits || hdrBits.length !== src.length) hdrBits = new Uint16Array(src.length);
+  const bits = hdrBits;
+  const f = new Float32Array(1);
+  const u = new Uint32Array(f.buffer);
+  for (let i = 0; i < src.length; i++) {
+    f[0] = src[i];
+    const x = u[0];
+    const sign = (x >>> 16) & 0x8000;
+    if ((x & 0x7fffffff) < 0x38800000) { bits[i] = sign; continue; }
+    if ((x & 0x7fffffff) > 0x477fe000) { bits[i] = sign | 0x7c00; continue; }
+    bits[i] = sign | ((((x >>> 23) & 0xff) - 112) << 10) | ((x >>> 13) & 0x3ff);
+  }
+  return new Float16Array(bits.buffer);
+}
+
+function hdrImage(data, w, h) {
+  const opt = { colorSpace: 'rec2100-pq' };
+  opt[hdrKind] = 'float16';
+  try { return new ImageData(float16Of(data), w, h, opt); } catch (e) { return null; }
+}
+
+function hideHdr() {
+  drop.classList.remove('is-hdr');
+  hdrCanvas.hidden = true;
+  hdrBits = null;
+  if (hdrCanvas.width) hdrCanvas.width = hdrCanvas.height = 0;
+}
+
+function syncHdrNote() {
+  const show = viewSelect.value === 'preview' && drop.classList.contains('is-hdr');
+  hdrNote.hidden = !show;
+  if (show) hdrNote.textContent = text('preview.hdr', { nits: HDR_PEAK });
+}
+
+function presentHdr(frame) {
+  const ctx = frame && hdrContext();
+  if (!ctx) { hideHdr(); return; }
+  if (hdrCanvas.width !== frame.w || hdrCanvas.height !== frame.h) {
+    hdrCanvas.width = frame.w;
+    hdrCanvas.height = frame.h;
+  }
+  const image = hdrImage(frame.data, frame.w, frame.h);
+  if (!image) { hdrKind = 'no'; hdrCtx = null; hideHdr(); return; }
+  ctx.putImageData(image, 0, 0);
+  hdrCanvas.hidden = false;
+  drop.classList.add('is-hdr');
+}
+
 function presentCurrent() {
   const params = readParams();
+  const preview = viewSelect.value === 'preview';
+  const hdr = preview && hdrScreen() && !!hdrContext() && !engine.hdrFailed();
   engine.present(viewSelect.value, {
     split: params.split,
     layout: params.layoutPair,
@@ -1036,13 +1282,21 @@ function presentCurrent() {
     rot: previewRot,
     zoom: viewZoom.zoom,
     center: [viewZoom.x, viewZoom.y],
-    viewSize: viewSelect.value === 'preview' ? previewViewSize() : null,
+    viewSize: preview ? previewViewSize() : null,
+    hdr,
   });
+  if (hdr) presentHdr(engine.hdrFrame());
+  else hideHdr();
+  syncHdrNote();
 }
 
 new ResizeObserver(() => {
   if (viewSelect.value === 'preview' && original) presentCurrent();
 }).observe(drop);
+window.matchMedia('(dynamic-range: high)').addEventListener('change', () => {
+  if (original) presentCurrent();
+  else syncHdrNote();
+});
 
 function drawThumbnails() {
   engine.thumbnails(stripThumbs);
@@ -1058,14 +1312,15 @@ let lastRender = null;
 
 function runEngine(size, tile, params) {
   if (engine.size().w !== size.w || engine.size().h !== size.h) engine.resize(size.w, size.h);
-  engine.setSource(paint(tile.source, size.w, size.h));
+  uploadPainted((c) => engine.setSource(c), tile.source, size.w, size.h);
   for (const [name] of SLOTS) {
     const mode = document.querySelector('[data-slot-mode="' + name + '"]').value;
-    if (mode === 'load' && slotImages[name]) engine.setLoaded(mapName(name), paint(tile.slots[name], size.w, size.h));
+    if (mode === 'load' && slotImages[name]) uploadPainted((c) => engine.setLoaded(mapName(name), c), tile.slots[name], size.w, size.h);
     else engine.setLoaded(mapName(name), null);
   }
   const maskFile = document.getElementById('mask-file')._image;
-  engine.setMask(maskFile ? paint(maskFile, size.w, size.h) : null);
+  if (maskFile) uploadPainted((c) => engine.setMask(c), maskFile, size.w, size.h);
+  else engine.setMask(null);
   const warnings = engine.update(params) || [];
   if (engine.lost()) throw new Error('gpu-oom');
   return warnings;
@@ -1113,6 +1368,8 @@ async function atOutputSize(fn) {
 }
 
 async function render() {
+  clearTimeout(tileIdle);
+  tileIdle = 0;
   SLOTS.forEach(([name]) => syncSlot(name));
   syncViewButtons();
   if (!original) return;
@@ -1264,7 +1521,7 @@ function tiledSet(params, slotNames) {
   const opts = tileOpts(params);
   const key = [idOf(base)].concat(slotNames.map((name) => name + idOf(sources[name])), JSON.stringify([frame, sides, opts])).join('|');
   if (tileCache.key === key) return tileCache.result;
-  const datas = [imageDataOf(base).data].concat(slotNames.map((name) => imageDataOf(paint(sources[name], W, H)).data));
+  const datas = [imageDataOf(base).data].concat(slotNames.map((name) => imageDataOf(sources[name], W, H).data));
   const out = tileImages(datas, W, H, frame, sides, opts);
   const ratio = frameRatio(params.cropShape, W, H);
   const result = {
@@ -1306,7 +1563,17 @@ function tileTabActive() {
   return !!active && active.dataset.tab === 'tile';
 }
 
+let editorQueued = false;
 function refreshEditor() {
+  if (editorQueued) return;
+  editorQueued = true;
+  requestAnimationFrame(() => {
+    editorQueued = false;
+    paintEditor();
+  });
+}
+
+function paintEditor() {
   if (!original || !tileTabActive()) {
     editor.show(null);
     tileBar.hidden = true;
@@ -1429,7 +1696,7 @@ function quadResult(preview) {
   if (fixCache.key !== preview.key) {
     const base = preview.base;
     const scale = Math.min(1, 320 / Math.max(base.width, base.height));
-    fixCache.data = imageDataOf(paint(base, Math.max(1, Math.round(base.width * scale)), Math.max(1, Math.round(base.height * scale))));
+    fixCache.data = imageDataOf(base, Math.max(1, Math.round(base.width * scale)), Math.max(1, Math.round(base.height * scale)));
     fixCache.key = preview.key;
     fixCache.quad = '';
   }
@@ -1483,10 +1750,12 @@ const editor = createTileEditor(drop, {
     framing = true;
     cropInput.value = frameString(frame);
     refreshEditor();
+    scheduleTileWork();
   },
   onFade(side, key, value) {
     document.querySelector('[data-param="' + side + key.toUpperCase() + '"]').value = value;
     refreshEditor();
+    scheduleTileWork();
   },
   onQuad(quad) {
     quadInput.value = quad.map((v) => v.toFixed(4)).join(',');
@@ -1499,11 +1768,9 @@ const editor = createTileEditor(drop, {
   onEnd() {
     commit();
     if (fixTools.open) return;
-    if (framing) {
-      framing = false;
-      refreshEditor();
-    }
-    schedule();
+    if (framing) framing = false;
+    refreshEditor();
+    scheduleTileWork();
   },
   onView: setTileView,
 });
@@ -1513,7 +1780,7 @@ document.getElementById('fit-frame').addEventListener('click', () => {
   remember();
   cropInput.value = '';
   commit();
-  schedule();
+  scheduleTileWork();
   refreshEditor();
 });
 
@@ -1583,6 +1850,11 @@ document.body.addEventListener('input', (event) => {
     return;
   }
   if (event.target.matches('[data-param], [data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-slot-color], [data-slot-factor], [data-region-class], [data-region-metal]')) {
+    if (tileTabActive() && TILE_EDIT.has(event.target.dataset.param)) {
+      refreshEditor();
+      scheduleTileWork();
+      return;
+    }
     schedule();
     refreshEditor();
   }
@@ -1735,11 +2007,9 @@ canvas.addEventListener('pointermove', (event) => {
     presentCurrent();
     return;
   }
-  if (preview ? !lightDrag : event.buttons !== 1) return;
-  const point = imagePoint(event);
-  lightPointer.x = point.x * 2 - 1;
-  lightPointer.y = 1 - point.y * 2;
-  presentCurrent();
+  if (!preview || !lightDrag) return;
+  setSun(sunAngle.az + dx * 0.5, sunAngle.el - dy * 0.3);
+  panFrom = { x: event.clientX, y: event.clientY };
 });
 function endPan() {
   panFrom = null;
@@ -1917,10 +2187,7 @@ document.getElementById('solve-lights').addEventListener('click', () => {
   remember();
   const w = 256;
   const h = 256;
-  const images = lights.map((light) => {
-    const c = paint(light.image, w, h);
-    return c.getContext('2d').getImageData(0, 0, w, h).data;
-  });
+  const images = lights.map((light) => imageDataOf(light.image, w, h).data);
   const solved = solveLights(images, lights.map((light) => ({ az: light.az, el: light.el })), w, h);
   original = canvasFromRGBA(solved.albedo, w, h);
   slotImages.normal = canvasFromRGBA(solved.normal, w, h);

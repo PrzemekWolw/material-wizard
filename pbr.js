@@ -61,6 +61,11 @@ vec3 tonemap(vec3 c709) {
   float chroma = 1.0 - smoothstep(0.98, 1.16, ucs.x / 0.6025592);
   vec3 scaled = fromIctcp(vec3(toIctcp(skewed).x, ucs.yz * chroma));
   return TO_709 * (min(mix(skewed, scaled, 0.6), 2.5) / 2.5);
+}
+vec3 presentSRGB(vec3 lin) {
+  vec3 s = toSRGB(tonemap(lin));
+  float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  return s + (n - 0.5) / 255.0;
 }`;
 
 const ATMOSPHERE = `const float RE = 6371e3;
@@ -79,13 +84,26 @@ vec2 rsi(vec3 o, vec3 d, float r) {
   h = sqrt(h);
   return vec2(-b - h, -b + h);
 }
+// 0 in the planet's shadow, fading in across the last few km above the surface.
+float sunLit(vec3 p, vec3 s) {
+  float b = dot(p, s);
+  float h2 = b * b - (dot(p, p) - RE * RE);
+  if (h2 >= 0.0 && -b - sqrt(h2) > 1.0) return 0.0;
+  if (b >= 0.0) return 1.0;
+  return smoothstep(0.0, 4000.0, length(p - s * b) - RE);
+}
+vec3 skyKnee(vec3 c) {
+  float m = max(c.r, max(c.g, c.b));
+  const float k = 8.0;
+  if (m <= k) return c;
+  return c * (k * (2.0 - exp(-(m - k) / k)) / m);
+}
 bool scatter(vec3 d, vec3 s, out vec3 col, out vec3 trans) {
   vec3 o = vec3(0.0, RE + 2.0, 0.0);
   float tEnd = rsi(o, d, RA).y;
   float g = rsi(o, d, RE).x;
   bool ground = g > 0.0;
   if (ground) tEnd = g;
-  float ds = tEnd / 16.0;
   float mu = dot(d, s);
   float pr = 3.0 / (16.0 * PI) * (1.0 + mu * mu);
   float gg = MIE_G * MIE_G;
@@ -94,26 +112,37 @@ bool scatter(vec3 d, vec3 s, out vec3 col, out vec3 trans) {
   float odM = 0.0;
   vec3 totR = vec3(0.0);
   vec3 totM = vec3(0.0);
-  for (int i = 0; i < 16; i++) {
-    vec3 p = o + d * (ds * (float(i) + 0.5));
-    float h = length(p) - RE;
-    float hr = exp(-h / HR) * ds;
-    float hm = exp(-h / HM) * ds;
+  const int N = 24;
+  for (int i = 0; i < N; i++) {
+    float u0 = float(i) / float(N);
+    float u1 = float(i + 1) / float(N);
+    float a = tEnd * u0 * u0;
+    float b = tEnd * u1 * u1;
+    float seg = b - a;
+    vec3 p = o + d * (0.5 * (a + b));
+    float h = max(0.0, length(p) - RE);
+    float hr = exp(-h / HR) * seg;
+    float hm = exp(-h / HM) * seg;
     odR += hr;
     odM += hm;
-    if (rsi(p, s, RE).x > 0.0) continue;
-    float dl = rsi(p, s, RA).y / 8.0;
+    float lit = sunLit(p, s);
+    if (lit <= 0.0) continue;
+    float tSun = max(rsi(p, s, RA).y, 1.0);
     float lr = 0.0;
     float lm = 0.0;
-    for (int j = 0; j < 8; j++) {
-      vec3 q = p + s * (dl * (float(j) + 0.5));
-      float hl = length(q) - RE;
-      lr += exp(-hl / HR) * dl;
-      lm += exp(-hl / HM) * dl;
+    const int M = 8;
+    for (int j = 0; j < M; j++) {
+      float v0 = float(j) / float(M);
+      float v1 = float(j + 1) / float(M);
+      float c0 = tSun * v0 * v0;
+      float c1 = tSun * v1 * v1;
+      float hl = max(0.0, length(p + s * (0.5 * (c0 + c1))) - RE);
+      lr += exp(-hl / HR) * (c1 - c0);
+      lm += exp(-hl / HM) * (c1 - c0);
     }
     vec3 att = exp(-(BM * (odM + lm) + BR * (odR + lr)));
-    totR += hr * att;
-    totM += hm * att;
+    totR += hr * att * lit;
+    totM += hm * att * lit;
   }
   col = SUN * (pr * BR * totR + pm * BM * totM);
   trans = exp(-(BR * odR + BM * odM));
@@ -531,7 +560,39 @@ void main() {
   vec3 trans = vec3(1.0);
   bool ground = scatter(d, uSun, col, trans);
   if (ground) col += trans * GROUND / PI * uSunColor * max(uSun.y, 0.0) * 1.3;
-  o = vec4(col, 1.0);
+  o = vec4(skyKnee(col), 1.0);
+}`,
+
+  // The equirect sky is too coarse to fill the view, so the background is drawn at screen size.
+  skyView: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform vec3 uSun;
+uniform vec3 uSunColor;
+uniform vec2 uRes;
+uniform vec2 uView;
+uniform float uRepeatX;
+uniform float uRepeatY;
+uniform float uZoom;
+uniform vec2 uCenter;
+const float FOCAL = 3.0;
+${EQUIRECT}
+${ATMOSPHERE}
+void main() {
+  float texA = uRes.x / max(uRes.y, 1.0);
+  float viewA = uView.x / max(uView.y, 1.0);
+  vec2 rep = vec2(max(uRepeatX, 1.0), max(uRepeatY, 1.0));
+  float fit = max(rep.y, texA * rep.x / rep.y / viewA);
+  float zoom = max(uZoom, 0.05);
+  vec2 s = (vUv - 0.5) / zoom + uCenter - 0.5;
+  vec3 rd = normalize(vec3(s.x * viewA * fit, s.y * fit, -FOCAL));
+  vec3 col = vec3(0.0);
+  vec3 trans = vec3(1.0);
+  bool ground = scatter(rd, uSun, col, trans);
+  if (ground) col += trans * GROUND / PI * uSunColor * max(uSun.y, 0.0) * 1.3;
+  col += uSunColor * 400.0 * smoothstep(0.99996, 0.99999, dot(rd, uSun));
+  o = vec4(skyKnee(col), 1.0);
 }`,
 
   prefilter: `#version 300 es
@@ -614,6 +675,7 @@ uniform sampler2D uEnv2;
 uniform sampler2D uEnv3;
 uniform sampler2D uEnv4;
 uniform sampler2D uIrr;
+uniform sampler2D uSky;
 uniform vec3 uSun;
 uniform vec3 uSunColor;
 uniform vec2 uRes;
@@ -745,11 +807,7 @@ vec4 scene(vec2 s) {
   vec3 ro = vec3(0.0, 0.0, FOCAL);
   Hit h = trace(ro * uRot, rd * uRot);
   float exposure = autoExposure();
-  if (!h.ok) {
-    vec3 sky = envLevel(0.0, uvOf(rd));
-    sky += uSunColor * 400.0 * smoothstep(0.99996, 0.99999, dot(rd, uSun));
-    return vec4(sky * exposure, 0.0);
-  }
+  if (!h.ok) return vec4(texelFetch(uSky, ivec2(gl_FragCoord.xy), 0).rgb * exposure, 0.0);
   vec3 Ng = uRot * h.N;
   vec3 T = uRot * h.T;
   vec3 B = uRot * h.B;
@@ -829,7 +887,7 @@ void main() {
     cover += s.a;
   }
   vec3 hdr = min(acc / count, vec3(60000.0));
-  o = uDirect > 0.5 ? vec4(toSRGB(tonemap(hdr)), 1.0) : vec4(hdr, cover / count);
+  o = uDirect > 0.5 ? vec4(presentSRGB(hdr), 1.0) : vec4(hdr, cover / count);
 }`,
 
   // Karis average + quadratic threshold on the first downsample, 13 tap downsample after, tent upsample added back with blending.
@@ -895,7 +953,49 @@ uniform float uExposure;
 ${TONEMAP}
 void main() {
   vec3 c = textureLod(uHdr, vUv, 0.0).rgb * uExposure + uBloomScale * textureLod(uBloom, vUv, 0.0).rgb;
-  o = vec4(toSRGB(tonemap(c)), 1.0);
+  o = vec4(presentSRGB(c), 1.0);
+}`,
+
+  // GT7 HDR curve, then PQ in Rec.2020. Frame-buffer scale stays 1 = 100 nits. The canvas is rec2100-pq.
+  litPq: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uHdr;
+uniform sampler2D uBloom;
+uniform float uBloomScale;
+uniform float uExposure;
+uniform float uPeak;
+uniform float uMid;
+uniform float uLin;
+uniform float uToe;
+uniform float uKA;
+uniform float uKB;
+uniform float uKC;
+${TONEMAP}
+float evalCurve(float x) {
+  if (x < 0.0) return 0.0;
+  float w = smoothstep(0.0, uMid, x);
+  if (x < uLin * uPeak) {
+    float toeMapped = x <= 0.0 ? 0.0 : uMid * pow(x / uMid, uToe);
+    return (1.0 - w) * toeMapped + w * x;
+  }
+  return uKA + uKB * exp(x * uKC);
+}
+vec3 pqFromNits(vec3 nits) {
+  vec3 y = clamp(nits, 0.0, 10000.0) / 10000.0;
+  vec3 ym = pow(max(y, 0.0), vec3(0.1593017578125));
+  return pow((vec3(0.8359375) + 18.8515625 * ym) / (1.0 + 18.6875 * ym), vec3(78.84375));
+}
+void main() {
+  vec3 c709 = textureLod(uHdr, vUv, 0.0).rgb * uExposure + uBloomScale * textureLod(uBloom, vUv, 0.0).rgb;
+  vec3 c = max(TO_2020 * c709, 0.0);
+  vec3 ucs = toIctcp(c);
+  vec3 skewed = vec3(evalCurve(c.r), evalCurve(c.g), evalCurve(c.b));
+  float chroma = 1.0 - smoothstep(0.98, 1.16, ucs.x / max(toIctcp(vec3(uPeak)).x, 1e-4));
+  vec3 scaled = max(fromIctcp(vec3(toIctcp(skewed).x, ucs.yz * chroma)), 0.0);
+  vec3 mapped = min(mix(skewed, scaled, 0.6), vec3(uPeak));
+  o = vec4(pqFromNits(mapped * 100.0), 1.0);
 }`,
 
   // One mip texel of the lit frame as log2 luminance (-12..12) packed into 16 bits, plus coverage (sky is alpha 0, material is 1).
@@ -926,9 +1026,10 @@ function compile(gl, type, src) {
 
 function program(gl, fs) {
   const prog = gl.createProgram();
-  gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
-  gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, fs));
+  const shaders = [compile(gl, gl.VERTEX_SHADER, VS), compile(gl, gl.FRAGMENT_SHADER, fs)];
+  shaders.forEach((shader) => gl.attachShader(prog, shader));
   gl.linkProgram(prog);
+  shaders.forEach((shader) => gl.deleteShader(shader));
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
     throw new Error(gl.getProgramInfoLog(prog) || 'link');
   }
@@ -938,12 +1039,12 @@ function program(gl, fs) {
 const PREVIEW_SHAPES = { plane: 0, sphere: 1, cube: 2 };
 const IDENTITY3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
+// light: [azimuth, elevation] in degrees. Azimuth 0 is behind the camera, 180 faces it.
+// Elevation 0 is the horizon; negative is below it.
 function sunDirection(light) {
-  const x = light[0];
-  const z = 0.65;
-  const y = Math.max(light[1], 0.03 * Math.hypot(x, z));
-  const len = Math.hypot(x, y, z);
-  return [x / len, y / len, z / len];
+  const az = light[0] * Math.PI / 180;
+  const el = light[1] * Math.PI / 180;
+  return [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
 }
 
 function sunColor(dir) {
@@ -951,6 +1052,8 @@ function sunColor(dir) {
   const RA = 6471e3;
   const oy = RE + 2;
   const b = oy * dir[1];
+  const under = b * b - (oy * oy - RE * RE);
+  if (under >= 0 && -b - Math.sqrt(under) > 0) return [0, 0, 0];
   const t = -b + Math.sqrt(b * b - (oy * oy - RA * RA));
   const ds = t / 32;
   let odR = 0;
@@ -1002,10 +1105,14 @@ export function createEngine(canvas) {
   const used = new Set();
   let skyKey = '';
   let skyUp = [0, 0, 0];
+  let skyViewKey = '';
+  let skyViewTex = null;
   let shownScale = null;
   let exposureTime = 0;
   let adaptQueued = false;
   let liveParams = null;
+  let hdrFrameBuf = null;
+  let hdrReadFailed = false;
   let factors = { roughness: 1, metallic: 1, opacity: 1, normal: 1 };
   let tint = [1, 1, 1];
 
@@ -1509,6 +1616,26 @@ export function createEngine(canvas) {
     return env;
   }
 
+  // Full-resolution background. Kept while the sun and the framing stay the same.
+  function renderSkyView(sun, sunRgb, repeat, zoom, center) {
+    const view = rt('skyView', screenW, screenH, true);
+    const key = [sun, sunRgb, screenW, screenH, width, height, repeat, zoom, center].join();
+    if (key === skyViewKey && view.tex === skyViewTex) return view;
+    skyViewKey = key;
+    skyViewTex = view.tex;
+    draw('skyView', view, {}, {
+      uSun: sun,
+      uSunColor: sunRgb,
+      uRes: [width, height],
+      uView: [screenW, screenH],
+      uRepeatX: repeat[0],
+      uRepeatY: repeat[1],
+      uZoom: zoom,
+      uCenter: center,
+    });
+    return view;
+  }
+
   function exposureOf(sun, sunRgb) {
     const grey = sunRgb.map((c, i) => 0.18 * (c * Math.max(sun[1], 0) / Math.PI + skyUp[i]));
     return 0.7 / Math.max(0.2126 * grey[0] + 0.7152 * grey[1] + 0.0722 * grey[2], 1e-6);
@@ -1626,13 +1753,76 @@ export function createEngine(canvas) {
   }
 
   function screenSize(view, params) {
-    const size = view === 'preview' && params.viewSize;
+    const size = params.viewSize;
     if (size && size[0] >= 2 && size[1] >= 2) return size;
     return layoutSize(params.layout || [1, 1]);
   }
 
+  function hdrCurve(nits) {
+    const peak = nits / 100;
+    const mid = 0.538;
+    const lin = 0.444;
+    const toe = 1.28;
+    const k = (lin - 1) / (0.25 - 1);
+    return {
+      peak, mid, lin, toe,
+      kA: peak * lin + peak * k,
+      kB: -peak * k * Math.exp(lin / k),
+      kC: -1 / (k * peak),
+    };
+  }
+
+  let hdrRaw = null;
+  let hdrFlip = null;
+  function readHdr(lit, litU) {
+    const curve = hdrCurve(1000);
+    const pq = rt('litPq', screenW, screenH, true);
+    draw('litPq', pq, lit, {
+      uBloomScale: litU.uBloomScale,
+      uExposure: litU.uExposure,
+      uPeak: curve.peak,
+      uMid: curve.mid,
+      uLin: curve.lin,
+      uToe: curve.toe,
+      uKA: curve.kA,
+      uKB: curve.kB,
+      uKC: curve.kC,
+    });
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pq.fb);
+    gl.getError();
+    const n = pq.w * pq.h * 4;
+    if (!hdrRaw || hdrRaw.length !== n) {
+      hdrRaw = new Float32Array(n);
+      hdrFlip = new Float32Array(n);
+    }
+    try { gl.readPixels(0, 0, pq.w, pq.h, gl.RGBA, gl.FLOAT, hdrRaw); }
+    catch (e) { hdrReadFailed = true; return null; }
+    if (gl.getError()) {
+      hdrReadFailed = true;
+      return null;
+    }
+    const row = pq.w * 4;
+    for (let y = 0; y < pq.h; y++) hdrFlip.set(hdrRaw.subarray(y * row, y * row + row), (pq.h - 1 - y) * row);
+    return { data: hdrFlip, w: pq.w, h: pq.h };
+  }
+
+  function dropLit() {
+    rts.forEach((target, name) => {
+      if (name !== 'litHdr' && name !== 'litPq' && name !== 'meter' && name !== 'skyView' && !name.startsWith('bloom')) return;
+      gl.deleteTexture(target.tex);
+      gl.deleteFramebuffer(target.fb);
+      rts.delete(name);
+    });
+    hdrRaw = null;
+    hdrFlip = null;
+  }
+
   function present(view, params) {
-    if (view !== 'preview') liveParams = null;
+    if (view !== 'preview') {
+      liveParams = null;
+      if (!params.thumb) dropLit();
+    }
+    hdrFrameBuf = null;
     if (!finals.albedo) return;
     const size = screenSize(view, params);
     screenW = size[0];
@@ -1673,10 +1863,11 @@ export function createEngine(canvas) {
       const savedT = wrapT;
       wrapS = gl.REPEAT;
       wrapT = gl.REPEAT;
-      const sun = sunDirection(params.light || [0.3, 0.4]);
+      const sun = sunDirection(params.light || [25, 30]);
       const sunRgb = sunColor(sun);
       const env = bakeSky(sun, sunRgb);
       Object.assign(inputs, env);
+      inputs.uSky = renderSkyView(sun, sunRgb, repeat, zoom, center);
       const hdr = floatOk ? rt('litHdr', screenW, screenH, true) : null;
       draw('preview', hdr, inputs, {
         uDirect: hdr ? 0 : 1,
@@ -1704,17 +1895,17 @@ export function createEngine(canvas) {
       if (hdr) {
         const target = exposureScale(hdr, sunRgb);
         let scale = target;
-        if (params.viewSize) {
+        if (params.viewSize && !params.thumb) {
           liveParams = params;
           scale = smoothScale(target);
           if (Math.abs(Math.log(target / scale)) > 0.05) queueExposure();
         }
         const bloom = bloomChain(hdr, exposureOf(sun, sunRgb) * scale, scale);
-        draw('litFinal', null, { uHdr: hdr, uBloom: bloom ? bloom.tex : hdr }, {
-          uBloomScale: bloom ? bloom.weight : 0,
-          uExposure: scale,
-        });
-      }
+        const lit = { uHdr: hdr, uBloom: bloom ? bloom.tex : hdr };
+        const litU = { uBloomScale: bloom ? bloom.weight : 0, uExposure: scale };
+        draw('litFinal', null, lit, litU);
+        hdrFrameBuf = params.hdr && !hdrReadFailed ? readHdr(lit, litU) : null;
+      } else hdrFrameBuf = null;
       return;
     }
     const chosen = map[view] || map.albedo;
@@ -1734,8 +1925,16 @@ export function createEngine(canvas) {
   function thumbnails(targets) {
     if (!finals.albedo) return;
     Object.keys(targets).forEach((view) => {
-      present(view, { split: 0, layout: [1, 1], seamLines: false, shape: 'plane' });
       const thumb = targets[view];
+      const k = Math.min(1, 2 * Math.max(thumb.width, thumb.height) / Math.max(width, height));
+      present(view, {
+        split: 0,
+        layout: [1, 1],
+        seamLines: false,
+        shape: 'plane',
+        thumb: true,
+        viewSize: [Math.max(2, Math.round(width * k)), Math.max(2, Math.round(height * k))],
+      });
       thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height);
     });
   }
@@ -1787,6 +1986,8 @@ export function createEngine(canvas) {
 
   return {
     setSource, setLoaded, setMask, update, present, thumbnails, resize, readMap, warnings, release, maxSize,
+    hdrFrame() { return hdrFrameBuf; },
+    hdrFailed() { return hdrReadFailed; },
     lost() { return gl.isContextLost(); },
     size() { return { w: width, h: height }; },
   };

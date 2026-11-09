@@ -250,7 +250,9 @@
     "title": "preview",
     "note": "Opens the lit view. Drag to turn the shape, Shift-drag or the right button to move the sun, scroll to zoom. Double-click resets the turn and the zoom. Middle-drag pans while zoomed in.",
     "hint": "Drag turns the shape. Shift-drag or right-drag moves the sun. Scroll zooms. Double-click resets.",
-    "zoomTip": "Scroll to zoom out or in. Double-click resets."
+    "zoomTip": "Scroll to zoom out or in. Double-click resets.",
+    "sunTip": "Drag to place the sun. The centre is straight overhead, the bright ring is the horizon, and past it the sun sits below the horizon. The camera is at the bottom, so the top of the dial puts the sun in front of it. Scroll changes the height. Double-click resets.",
+    "hdr": "The lit view is HDR on this screen. Highlights go up to {nits} nits."
   },
   "export": {
     "title": "export",

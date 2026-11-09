@@ -140,6 +140,15 @@ body.mw-resizing-h { cursor: row-resize; user-select: none; }
 
 .mw-stage > :not(.mw-canvas-wrap) { flex: none; }
 
+.mw-stage > .mw-stage-bottom {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .mw-drop {
   position: absolute;
   inset: 0;
@@ -172,6 +181,31 @@ body.mw-resizing-h { cursor: row-resize; user-select: none; }
 
 .mw-lit-tip[hidden],
 .mw-canvas-wrap:has(.mw-tile-edit:not([hidden])) .mw-lit-tip { display: none; }
+
+.mw-hdr-note { left: auto; right: 8px; bottom: auto; top: 8px; max-width: 280px; }
+
+.mw-canvas-wrap canvas.mw-sun-dial {
+  position: absolute;
+  inset: auto 8px 8px auto;
+  width: 128px;
+  height: 128px;
+  z-index: 3;
+  cursor: grab;
+  touch-action: none;
+}
+.mw-canvas-wrap canvas.mw-sun-dial:active { cursor: grabbing; }
+.mw-sun-dial[hidden],
+.mw-canvas-wrap:has(.mw-tile-edit:not([hidden])) .mw-sun-dial { display: none; }
+
+#view-hdr { pointer-events: none; z-index: 1; }
+#view-hdr[hidden] { display: none !important; }
+.mw-canvas-wrap.is-hdr > #view-hdr {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
 
 .mw-canvas-wrap.is-over { outline: 2px solid var(--accent); }
 

@@ -226,6 +226,8 @@
   "preview.note": "Öffnet die beleuchtete Ansicht. Ziehen dreht die Form, Umschalt-Ziehen oder die rechte Taste bewegt die Sonne, das Rad zoomt. Doppelklick setzt Drehung und Zoom zurück. Beim Zoomen verschiebt die mittlere Taste die Ansicht.",
   "preview.hint": "Ziehen dreht die Form. Umschalt-Ziehen oder Rechtsziehen bewegt die Sonne. Das Rad zoomt. Doppelklick setzt zurück.",
   "preview.zoomTip": "Mit dem Rad hinein- und herauszoomen. Doppelklick setzt zurück.",
+  "preview.sunTip": "Ziehen, um die Sonne zu setzen. Die Mitte ist direkt oben, der helle Ring ist der Horizont und dahinter steht die Sonne unter dem Horizont. Die Kamera ist unten, also stellt der obere Teil die Sonne vor sie. Das Mausrad ändert die Höhe. Doppelklick setzt zurück.",
+  "preview.hdr": "Die beleuchtete Ansicht ist auf diesem Bildschirm HDR. Spitzlichter gehen bis {nits} Nits.",
   "export.title": "Export",
   "export.name": "Materialname",
   "export.nameNote": "Der Name kommt vom geöffneten Foto. Er benennt das Zip und jede gespeicherte Map.",

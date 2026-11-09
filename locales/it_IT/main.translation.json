@@ -226,6 +226,8 @@
   "preview.note": "Apre la vista illuminata. Trascina per ruotare la forma, trascina con Maiusc o il tasto destro per spostare il sole, la rotella ingrandisce. Doppio clic azzera rotazione e zoom. Con lo zoom, il tasto centrale sposta la vista.",
   "preview.hint": "Trascinare ruota la forma. Maiusc o il tasto destro sposta il sole. La rotella fa zoom. Doppio clic azzera.",
   "preview.zoomTip": "La rotella ingrandisce e rimpicciolisce. Doppio clic azzera.",
+  "preview.sunTip": "Trascina per posizionare il sole. Il centro è lo zenit, l'anello chiaro è l'orizzonte e oltre il sole è sotto l'orizzonte. La camera è in basso, quindi la parte alta mette il sole davanti a lei. La rotella cambia l'altezza. Doppio clic per ripristinare.",
+  "preview.hdr": "La vista illuminata è HDR su questo schermo. Le alte luci arrivano a {nits} nit.",
   "export.title": "esporta",
   "export.name": "Nome del materiale",
   "export.nameNote": "Il nome viene dalla foto aperta. Dà il nome allo zip e a ogni mappa salvata.",

@@ -226,6 +226,8 @@
   "preview.note": "Otwiera podgląd oświetlenia. Przeciągnij, aby obrócić kształt, przeciągnij z Shift lub prawym przyciskiem, aby przesunąć słońce, kółkiem przybliżasz i oddalasz. Podwójne kliknięcie zeruje obrót i powiększenie. Przy powiększeniu środkowy przycisk przesuwa widok.",
   "preview.hint": "Przeciągnij obraca kształt. Shift lub prawy przycisk rusza słońce. Kółko przybliża. Podwójne kliknięcie zeruje.",
   "preview.zoomTip": "Kółkiem przybliżasz i oddalasz. Podwójne kliknięcie zeruje.",
+  "preview.sunTip": "Przeciągnij, aby ustawić słońce. Środek to zenit, jasny pierścień to horyzont, a za nim słońce jest pod horyzontem. Kamera jest na dole, więc góra tarczy stawia słońce przed nią. Kółko myszy zmienia wysokość. Kliknij dwukrotnie, aby przywrócić.",
+  "preview.hdr": "Podgląd oświetlenia jest HDR na tym ekranie. Jasne miejsca sięgają {nits} nitów.",
   "export.title": "eksport",
   "export.name": "Nazwa materiału",
   "export.nameNote": "Nazwa pochodzi od otwartego zdjęcia. Nazywa plik zip i każdą zapisaną mapę.",

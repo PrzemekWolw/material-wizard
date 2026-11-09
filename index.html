@@ -48,10 +48,14 @@
       </div>
       <div class="mw-canvas-wrap" id="drop">
         <canvas id="view"></canvas>
+        <canvas id="view-hdr" hidden></canvas>
         <p class="mw-lit-tip" id="lit-tip" hidden data-copy="preview.hint"></p>
+        <p class="mw-lit-tip mw-hdr-note" id="hdr-note" hidden></p>
+        <canvas class="mw-sun-dial" id="sun-dial" hidden data-title="preview.sunTip"></canvas>
         <div class="mw-drop"><span><i class="fa-regular fa-image"></i><br><span data-copy="drop"></span></span></div>
       </div>
       <div class="mw-split mw-split-h" id="split-h" role="separator" aria-orientation="horizontal" tabindex="0" data-title="splitHeightTip"></div>
+      <div class="mw-stage-bottom">
       <div class="mw-strip" id="map-strip"></div>
       <div class="mw-viewbar">
         <button type="button" id="undo" data-title="undoTip" disabled><i class="fa-solid fa-rotate-left"></i> <span data-copy="undo"></span></button>
@@ -99,6 +103,7 @@
       </div>
       <div class="mw-warnings" id="warnings"></div>
       <p class="mw-note" id="scale-note"></p>
+      </div>
     </div>
 
     <div class="mw-split" id="split" role="separator" aria-orientation="vertical" tabindex="0" data-title="splitTip"></div>
