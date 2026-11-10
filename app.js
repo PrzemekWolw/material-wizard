@@ -690,12 +690,15 @@ function readZones() {
 document.getElementById('tabs').addEventListener('click', (event) => {
   const button = event.target.closest('[data-tab]');
   if (!button) return;
-  const wasTile = document.querySelector('[data-tab].is-active').dataset.tab === 'tile';
+  const previous = document.querySelector('[data-tab].is-active');
+  const wasTile = previous.dataset.tab === 'tile';
+  const tabs = Array.from(document.querySelectorAll('#tabs [data-tab]'));
+  const back = tabs.indexOf(button) < tabs.indexOf(previous);
   document.querySelectorAll('[data-tab]').forEach((el) => el.classList.toggle('is-active', el === button));
   document.querySelectorAll('[data-panel]').forEach((panel) => {
     const show = panel.getAttribute('data-panel') === button.dataset.tab;
     panel.classList.toggle('mw-hidden', !show);
-    if (show) enterContent(panel);
+    if (show) enterContent(panel, back);
   });
   if (TAB_VIEW[button.dataset.tab]) showView(TAB_VIEW[button.dataset.tab]);
   if (mobile.matches) {
@@ -706,14 +709,15 @@ document.getElementById('tabs').addEventListener('click', (event) => {
   refreshEditor();
 });
 
-const TAB_VIEW = { albedo: 'albedo', shape: 'height', surface: 'rough' };
+const TAB_VIEW = { albedo: 'albedo', shape: 'height', surface: 'rough', export: 'preview' };
 
 document.querySelector('[data-panel="albedo"]').addEventListener('input', (event) => {
   if (event.target.type === 'range' && event.target.dataset.param !== 'shadowFix' && event.target.dataset.param !== 'lightRange' && event.target.dataset.param !== 'lightStrength') document.querySelector('[data-param="albedoFix"]').checked = true;
 }, true);
 
-function enterContent(panel) {
+function enterContent(panel, back) {
   Array.from(panel.children).forEach((child, i) => child.style.setProperty('--i', Math.min(i, 10)));
+  panel.style.setProperty('--mw-from', back ? '-40px' : '40px');
   panel.classList.remove('mw-enter');
   void panel.offsetWidth;
   panel.classList.add('mw-enter');
@@ -963,8 +967,18 @@ appbar.addEventListener('click', (event) => {
   else if (action === 'redo') redo();
   else if (action === 'download') document.getElementById('download').click();
   else if (action === 'more') {
-    document.body.classList.toggle('mw-more-open');
-    document.body.style.setProperty('--mw-appbar-h', appbar.offsetHeight + 'px');
+    const body = document.body;
+    if (body.classList.contains('mw-more-closing')) return;
+    if (body.classList.contains('mw-more-open')) {
+      body.classList.add('mw-more-closing');
+      setTimeout(() => {
+        body.classList.remove('mw-more-open', 'mw-more-closing');
+        body.style.setProperty('--mw-appbar-h', appbar.offsetHeight + 'px');
+      }, 160);
+    } else {
+      body.classList.add('mw-more-open');
+      body.style.setProperty('--mw-appbar-h', appbar.offsetHeight + 'px');
+    }
   }
 });
 const compareButton = appbar.querySelector('[data-app="compare"]');
@@ -979,23 +993,81 @@ compareButton.addEventListener('pointerdown', () => {
   compareView = null;
 }));
 
+// Pivot swipe: the open panel and the header strip follow the finger, then snap back or turn the page.
 let swipeFrom = null;
+let swipeDragged = false;
+const aside = document.querySelector('.mw-page > aside');
+const tabsBar = document.getElementById('tabs');
 const tabOrder = () => Array.from(document.querySelectorAll('#tabs [data-tab]'));
-document.querySelector('.mw-page > aside').addEventListener('pointerdown', (event) => {
-  swipeFrom = mobile.matches && !event.target.closest('input, select, textarea, canvas, .mw-tabs')
-    ? { x: event.clientX, y: event.clientY } : null;
+const activePanel = () => aside.querySelector('[data-panel]:not(.mw-hidden)');
+
+function swipeTarget(dx) {
+  const tabs = tabOrder();
+  const index = tabs.findIndex((tab) => tab.classList.contains('is-active'));
+  return tabs[index + (dx < 0 ? 1 : -1)] || null;
+}
+
+function moveSwipe(dx) {
+  const panel = activePanel();
+  const pull = swipeTarget(dx) ? dx : dx * 0.3;
+  const fade = Math.min(1, Math.abs(pull) / aside.clientWidth);
+  if (panel) {
+    panel.style.transform = 'translateX(' + pull + 'px)';
+    panel.style.opacity = String(1 - fade * 0.6);
+  }
+  tabsBar.style.transform = 'translateX(' + pull * 0.35 + 'px)';
+}
+
+function endSwipe(animate) {
+  [activePanel(), tabsBar].forEach((el) => {
+    if (!el) return;
+    el.classList.toggle('mw-swipe-back', animate);
+    el.style.transform = '';
+    el.style.opacity = '';
+  });
+  if (animate) setTimeout(() => aside.querySelectorAll('.mw-swipe-back').forEach((el) => el.classList.remove('mw-swipe-back')), 260);
+}
+
+aside.addEventListener('pointerdown', (event) => {
+  swipeDragged = false;
+  swipeFrom = mobile.matches && event.isPrimary && !event.target.closest('input, select, textarea, canvas, .mw-tabs')
+    ? { x: event.clientX, y: event.clientY, horizontal: null } : null;
 });
-document.querySelector('.mw-page > aside').addEventListener('pointerup', (event) => {
+aside.addEventListener('pointermove', (event) => {
   if (!swipeFrom) return;
   const dx = event.clientX - swipeFrom.x;
   const dy = event.clientY - swipeFrom.y;
+  if (swipeFrom.horizontal === null) {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+    swipeFrom.horizontal = Math.abs(dx) > Math.abs(dy) * 1.5;
+  }
+  if (!swipeFrom.horizontal) return;
+  swipeDragged = true;
+  moveSwipe(dx);
+});
+aside.addEventListener('pointerup', (event) => {
+  if (!swipeFrom) return;
+  const dx = event.clientX - swipeFrom.x;
+  const horizontal = swipeFrom.horizontal;
   swipeFrom = null;
-  if (Math.abs(dx) < 60 || Math.abs(dx) < 2 * Math.abs(dy)) return;
-  const tabs = tabOrder();
-  const index = tabs.findIndex((tab) => tab.classList.contains('is-active'));
-  const next = tabs[index + (dx < 0 ? 1 : -1)];
+  if (!horizontal) return;
+  const next = Math.abs(dx) >= 60 ? swipeTarget(dx) : null;
+  endSwipe(!next);
   if (next) next.click();
 });
+aside.addEventListener('pointercancel', () => {
+  if (!swipeFrom) return;
+  swipeFrom = null;
+  endSwipe(true);
+});
+aside.addEventListener('click', (event) => {
+  if (!swipeDragged) return;
+  swipeDragged = false;
+  if (!event.target.closest('.mw-tabs')) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}, true);
 
 document.getElementById('undo').addEventListener('click', undo);
 document.getElementById('redo').addEventListener('click', redo);
@@ -1874,6 +1946,21 @@ function paintEditor() {
     return;
   }
   const tileSeg = tileBar.querySelector('.mw-seg');
+  if (fixTabActive() && fixMode === 'crop') {
+    const preview = previewOf(original);
+    const frame = cropFrame();
+    tileBar.hidden = false;
+    tileSeg.hidden = true;
+    editor.show({
+      base: preview.base,
+      frame,
+      sides: NO_SIDES,
+      ratio: frameRatio(adjustShape.value, original.width, original.height),
+      view: 'frame',
+      labels: { size: text('ui.materialWizard.tile.frameSize', { w: Math.round(frame.w * original.width), h: Math.round(frame.h * original.height) }) },
+    });
+    return;
+  }
   if (fixTabActive()) {
     const preview = previewOf(original);
     tileBar.hidden = false;
@@ -1970,6 +2057,24 @@ const quadInput = document.getElementById('quad');
 const angleInput = document.getElementById('fix-angle');
 const IDENTITY_QUAD = [0, 0, 1, 0, 1, 1, 0, 1];
 let fixMode = 'rotate';
+let adjustFrame = '';
+const adjustShape = document.getElementById('adjust-shape');
+const NO_SIDES = { left: { on: false, a: 0, b: 0 }, right: { on: false, a: 0, b: 0 }, up: { on: false, a: 0, b: 0 }, down: { on: false, a: 0, b: 0 } };
+
+function cropFrame() {
+  if (!original) return { x: 0, y: 0, w: 1, h: 1 };
+  return parseFrame(adjustFrame) || autoFrame(original.width, original.height, frameRatio(adjustShape.value, original.width, original.height), NO_SIDES);
+}
+
+function cropCanvas(image, frame) {
+  const x = Math.max(0, Math.min(image.width - 1, Math.round(frame.x * image.width)));
+  const y = Math.max(0, Math.min(image.height - 1, Math.round(frame.y * image.height)));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.min(image.width - x, Math.round(frame.w * image.width)));
+  c.height = Math.max(1, Math.min(image.height - y, Math.round(frame.h * image.height)));
+  c.getContext('2d').drawImage(image, x, y, c.width, c.height, 0, 0, c.width, c.height);
+  return c;
+}
 const fixCache = { key: '', data: null, quad: '', result: null };
 
 function readQuad() {
@@ -2033,7 +2138,10 @@ angleInput.addEventListener('input', () => {
 const editor = createTileEditor(drop, {
   onStart() {
     remember();
-    if (fixTabActive()) return;
+    if (fixTabActive()) {
+      if (fixMode === 'crop' && original && !parseFrame(adjustFrame)) adjustFrame = frameString(cropFrame());
+      return;
+    }
     if (!parseFrame(cropInput.value)) {
       const params = readParams();
       const full = orientedOriginal(params.roadRuns);
@@ -2041,6 +2149,11 @@ const editor = createTileEditor(drop, {
     }
   },
   onFrame(frame) {
+    if (fixTabActive() && fixMode === 'crop') {
+      adjustFrame = frameString(frame);
+      refreshEditor();
+      return;
+    }
     framing = true;
     cropInput.value = frameString(frame);
     refreshEditor();
@@ -2573,6 +2686,30 @@ document.getElementById('straighten').addEventListener('click', () => {
 
 document.getElementById('fix-angle-reset').addEventListener('click', () => {
   setAngle(0);
+  refreshEditor();
+});
+
+adjustShape.addEventListener('input', () => { adjustFrame = ''; refreshEditor(); });
+document.getElementById('adjust-fit').addEventListener('click', () => { adjustFrame = ''; refreshEditor(); });
+document.getElementById('apply-crop').addEventListener('click', () => {
+  if (!original) return;
+  const frame = cropFrame();
+  if (frame.x < 0.001 && frame.y < 0.001 && frame.w > 0.999 && frame.h > 0.999) return;
+  remember();
+  original = cropCanvas(original, frame);
+  photoBytes = null;
+  photoName = null;
+  slotImages.albedo = original;
+  Object.keys(slotImages).forEach((name) => {
+    if (name !== 'albedo' && slotImages[name]) slotImages[name] = cropCanvas(slotImages[name], frame);
+  });
+  lights.forEach((light) => { light.image = cropCanvas(light.image, frame); });
+  const maskInput = document.getElementById('mask-file');
+  if (maskInput._image) maskInput._image = cropCanvas(maskInput._image, frame);
+  adjustFrame = '';
+  commit();
+  schedule();
+  drawLights();
   refreshEditor();
 });
 
@@ -3153,7 +3290,22 @@ window.addEventListener('appinstalled', () => {
   installItems.forEach((el) => { el.hidden = true; });
 });
 
+const startSnapshot = Object.assign(takeSnapshot(), { names: {} });
+const startSun = { az: sunAngle.az, el: sunAngle.el };
+
+function newProject() {
+  remember();
+  applySnapshot(startSnapshot);
+  projectHandle = null;
+  sessionNote = '';
+  adjustFrame = '';
+  Object.assign(sunAngle, startSun);
+  drawSunDial();
+  commit();
+}
+
 const FILE_ACTIONS = {
+  new: newProject,
   open: pickAndOpen,
   save: () => saveProject(false),
   saveAs: () => saveProject(true),

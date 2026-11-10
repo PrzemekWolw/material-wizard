@@ -32,7 +32,7 @@ test('settings, version, corrupt open and failed save', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
   await page.goto('/index.html');
-  expect(await page.locator('#app-version').textContent()).toBe('Material Wizard 0.2.0');
+  expect(await page.locator('#app-version').textContent()).toBe('Material Wizard 0.2.1');
   expect(await page.locator('[data-zone-row="0"] h3').textContent()).toBe('Base material');
   expect(await page.locator('#zones > h3').textContent()).toBe('Zones');
   expect(await page.locator('[data-param="albedoFix"]').isChecked()).toBe(false);
@@ -124,7 +124,7 @@ test('settings, version, corrupt open and failed save', async ({ page }) => {
     page.keyboard.press('Control+s'),
   ]);
   const project = await readProject(await readFile(await download.path()));
-  expect(project.session.version).toBe('0.2.0');
+  expect(project.session.version).toBe('0.2.1');
   expect(project.session.photo).toBe('photo.png');
   await page.evaluate(() => {
     window.CompressionStream = class extends CompressionStream {
@@ -345,4 +345,131 @@ test('picked lighting colors add, remove and clear', async ({ page }) => {
   expect(await page.locator('.mw-swatch').count()).toBe(0);
   expect(await shown('#light-options')).toBe(false);
   expect(await page.locator('[data-param="albedoFix"]').isChecked()).toBe(false);
+});
+
+async function openFlat(page, color) {
+  const png = await page.evaluate((fill) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = fill;
+    g.fillRect(0, 0, 64, 64);
+    return c.toDataURL('image/png');
+  }, color);
+  await page.locator('#open-file').evaluate((input, data) => {
+    const bin = atob(data.split(',')[1]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'flat.png', { type: 'image/png' }));
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, png);
+  await page.waitForFunction(() => document.querySelector('#drop').classList.contains('has-image'));
+}
+
+test('chrome text cannot be selected, fields can', async ({ page }) => {
+  await page.goto('/index.html');
+  const selectable = (selector) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).userSelect);
+  expect(await selectable('.mw-tabs button')).toBe('none');
+  expect(await selectable('#app-version')).toBe('text');
+  expect(await selectable('#preset-name')).toBe('text');
+});
+
+test('crop cuts the photo to the chosen shape', async ({ page }) => {
+  await page.goto('/index.html');
+  const png = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 80;
+    c.height = 40;
+    const g = c.getContext('2d');
+    g.fillStyle = '#c04020';
+    g.fillRect(0, 0, 80, 40);
+    g.fillStyle = '#2040c0';
+    g.fillRect(0, 0, 4, 4);
+    return c.toDataURL('image/png');
+  });
+  await page.locator('#open-file').evaluate((input, data) => {
+    const bin = atob(data.split(',')[1]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'wide.png', { type: 'image/png' }));
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, png);
+  await page.waitForFunction(() => document.querySelector('#drop').classList.contains('has-image'));
+  await page.evaluate(() => {
+    document.querySelector('[data-tab="fix"]').click();
+    document.querySelector('[data-fix-mode="crop"]').click();
+    const shape = document.getElementById('adjust-shape');
+    shape.value = '1:1';
+    shape.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('apply-crop').click();
+    const view = document.getElementById('view-mode');
+    view.value = 'source';
+    view.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForTimeout(700);
+  const pixel = await page.evaluate(() => {
+    const canvas = document.querySelector('#view');
+    const gl = canvas.getContext('webgl2');
+    const px = new Uint8Array(4);
+    gl.readPixels(2, canvas.height - 3, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    return [px[0], px[2]];
+  });
+  expect(pixel[0]).toBeGreaterThan(150);
+  expect(pixel[1]).toBeLessThan(80);
+});
+
+test('File New resets to the starting point and can be undone', async ({ page }) => {
+  await page.goto('/index.html');
+  await openFlat(page, '#808080');
+  await page.evaluate(() => {
+    const el = document.querySelector('[data-param="delight"]');
+    el.value = '1.2';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.evaluate(() => document.querySelector('[data-file-action="new"]').click());
+  expect(await page.evaluate(() => document.querySelector('#drop').classList.contains('has-image'))).toBe(false);
+  expect(await page.locator('[data-param="delight"]').inputValue()).toBe('0.65');
+  await page.evaluate(() => document.getElementById('undo').click());
+  await page.waitForFunction(() => document.querySelector('#drop').classList.contains('has-image'));
+  expect(await page.locator('[data-param="delight"]').inputValue()).toBe('1.2');
+});
+
+test('mobile pivot content follows the finger and turns the page', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 820 });
+  await page.goto('/index.html');
+  const state = await page.evaluate(async () => {
+    const aside = document.querySelector('.mw-page > aside');
+    const panel = aside.querySelector('[data-panel]:not(.mw-hidden)');
+    const rect = panel.getBoundingClientRect();
+    const x = rect.left + rect.width * 0.7;
+    const y = rect.top + 40;
+    const fire = (type, dx) => panel.dispatchEvent(new PointerEvent(type, { bubbles: true, isPrimary: true, pointerId: 1, pointerType: 'touch', clientX: x + dx, clientY: y }));
+    fire('pointerdown', 0);
+    fire('pointermove', -20);
+    fire('pointermove', -80);
+    const dragging = panel.style.transform;
+    const header = document.getElementById('tabs').style.transform;
+    fire('pointerup', -120);
+    return { dragging, header, active: document.querySelector('#tabs .is-active').dataset.tab, reset: panel.style.transform };
+  });
+  expect(state.dragging).toContain('translateX(-80px)');
+  expect(state.header).toContain('translateX(');
+  expect(state.active).toBe('fix');
+  expect(state.reset).toBe('');
+});
+
+test('mobile app bar labels open and close', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 820 });
+  await page.goto('/index.html');
+  const more = page.locator('[data-app="more"]');
+  await more.click();
+  expect(await page.evaluate(() => document.body.classList.contains('mw-more-open'))).toBe(true);
+  await more.click();
+  expect(await page.evaluate(() => document.body.classList.contains('mw-more-closing'))).toBe(true);
+  await page.waitForFunction(() => !document.body.classList.contains('mw-more-open'));
 });

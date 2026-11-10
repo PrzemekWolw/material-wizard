@@ -69,6 +69,7 @@
   <noscript><p class="mw-note">Material Wizard needs JavaScript and WebGL2. It turns one photo into PBR maps for BeamNG.drive: base color, height, normal, roughness, metallic, ambient occlusion and opacity.</p></noscript>
   <div class="mw-page">
     <div class="mw-flyout" data-flyout="file" role="menu" hidden>
+      <button type="button" class="mw-item" role="menuitem" data-file-action="new"><span data-copy="ui.materialWizard.menu.new"></span></button>
       <button type="button" class="mw-item" role="menuitem" data-file-action="open"><span data-copy="ui.materialWizard.menu.open"></span><kbd>Ctrl+O</kbd></button>
       <button type="button" class="mw-item" role="menuitem" data-file-action="save"><span data-copy="ui.materialWizard.menu.save"></span><kbd>Ctrl+S</kbd></button>
       <button type="button" class="mw-item" role="menuitem" data-file-action="saveAs"><span data-copy="ui.materialWizard.menu.saveAs"></span><kbd>Ctrl+Shift+S</kbd></button>
@@ -224,13 +225,12 @@
 
       <section class="mw-panel mw-hidden" data-panel="fix">
         <h2 data-copy="ui.materialWizard.fix.title"></h2>
-        <p class="mw-note" data-copy="ui.materialWizard.fix.note"></p>
         <div class="mw-seg" id="fix-mode">
           <button type="button" data-fix-mode="rotate" class="is-active"><i class="fa-solid fa-rotate"></i> <span data-copy="ui.materialWizard.fix.straighten"></span></button>
           <button type="button" data-fix-mode="quad"><i class="fa-regular fa-object-ungroup"></i> <span data-copy="ui.materialWizard.fix.perspective"></span></button>
+          <button type="button" data-fix-mode="crop"><i class="fa-solid fa-crop-simple"></i> <span data-copy="ui.materialWizard.fix.crop"></span></button>
         </div>
         <div class="mw-fix" data-fix="rotate">
-          <p class="mw-note" data-copy="ui.materialWizard.fix.rotateNote"></p>
           <label class="mw-field"><span data-copy="ui.materialWizard.fix.angle"></span><output id="fix-angle-value">0.0°</output>
             <input type="range" id="fix-angle" min="-45" max="45" step="0.1" value="0">
           </label>
@@ -241,11 +241,30 @@
           </div>
         </div>
         <div class="mw-fix" data-fix="quad" hidden>
-          <p class="mw-note" data-copy="ui.materialWizard.fix.quadNote"></p>
           <input type="hidden" id="quad" value="0,0, 1,0, 1,1, 0,1">
           <div class="mw-actions">
             <button type="button" id="quad-reset"><span data-copy="ui.materialWizard.fix.reset"></span></button>
             <button type="button" class="mw-primary" id="rectify"><i class="fa-solid fa-check"></i> <span data-copy="ui.materialWizard.fix.apply"></span></button>
+          </div>
+        </div>
+        <div class="mw-fix" data-fix="crop" hidden>
+          <div class="mw-actions">
+            <label class="mw-text"><span data-copy="ui.materialWizard.fix.cropShape"></span>
+              <select id="adjust-shape">
+                <option value="free" data-copy="ui.materialWizard.tile.frameFree"></option>
+                <option value="1:1">1:1</option>
+                <option value="4:3">4:3</option>
+                <option value="3:2">3:2</option>
+                <option value="16:9">16:9</option>
+                <option value="2:1">2:1</option>
+                <option value="3:4">3:4</option>
+                <option value="2:3">2:3</option>
+                <option value="9:16">9:16</option>
+                <option value="1:2">1:2</option>
+              </select>
+            </label>
+            <button type="button" id="adjust-fit" data-copy="ui.materialWizard.tile.fit" data-title="ui.materialWizard.tile.fitTip"></button>
+            <button type="button" class="mw-primary" id="apply-crop"><i class="fa-solid fa-check"></i> <span data-copy="ui.materialWizard.fix.apply"></span></button>
           </div>
         </div>
       </section>
@@ -254,7 +273,6 @@
         <h2 data-copy="ui.materialWizard.tile.title"></h2>
         <label class="mw-check"><input type="checkbox" data-param="tileOn"> <span data-copy="ui.materialWizard.tile.enable"></span></label>
         <label class="mw-check"><input type="checkbox" data-param="tileEven" checked> <span data-copy="ui.materialWizard.tile.even"></span></label>
-        <p class="mw-note" data-copy="ui.materialWizard.tile.intro"></p>
         <div class="mw-actions">
           <button type="button" data-preset="surface"><span data-copy="ui.materialWizard.tile.surface"></span></button>
           <button type="button" data-preset="road"><span data-copy="ui.materialWizard.tile.roadPreset"></span></button>
@@ -284,7 +302,6 @@
           <label class="mw-toggle mw-pad-right" data-axis="x"><input type="checkbox" data-param="tileRight"><span data-copy="ui.materialWizard.tile.edgeRight"></span></label>
           <label class="mw-toggle mw-pad-down" data-axis="y"><input type="checkbox" data-param="tileDown"><span data-copy="ui.materialWizard.tile.edgeBottom"></span></label>
         </div>
-        <p class="mw-note" data-copy="ui.materialWizard.tile.edgesNote"></p>
         <div class="mw-fades">
           <div class="mw-fade" data-fade="up" data-axis="y"><div class="mw-fade-head"><span class="mw-fade-name" data-copy="ui.materialWizard.tile.edgeTop"></span><label class="mw-fade-eye" data-title="ui.materialWizard.tile.highlightTip"><input type="checkbox" data-cover="up" checked><i class="fa-regular fa-eye"></i></label></div>
             <label class="mw-field"><span data-copy="ui.materialWizard.tile.fadeStart"></span><input type="range" data-param="upA" min="0" max="0.5" step="0.0005" value="0.03"></label>
@@ -463,7 +480,6 @@
 
       <section class="mw-panel mw-hidden" data-panel="surface">
         <h2 data-copy="ui.materialWizard.surface.title"></h2>
-        <p class="mw-note" data-copy="ui.materialWizard.surface.zonesNote"></p>
         <div id="zones"></div>
         <div class="mw-actions"><button type="button" id="add-zone" data-copy="ui.materialWizard.surface.addZone"></button></div>
         <h3 class="mw-sub" data-copy="ui.materialWizard.surface.variation"></h3>
@@ -501,7 +517,6 @@
           </label>
         </div>
         <h2 data-copy="ui.materialWizard.surface.metal"></h2>
-        <p class="mw-note" data-copy="ui.materialWizard.surface.metalNote"></p>
         <label class="mw-field"><span data-copy="ui.materialWizard.surface.metalWear"></span>
           <input type="range" data-param="metalWear" min="0" max="1" step="0.01" value="0">
         </label>
