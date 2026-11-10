@@ -272,30 +272,202 @@ function blendSide(bufs, along, size, avail, side, maxW, opts, d0, dt, ds, off) 
   } else {
     for (let s = 0; s < along; s++) mask.set(fade, s * band);
   }
-  const o4 = off * 4;
   for (const buf of bufs) {
-    if (ds === 1) {
-      for (let t = 0; t < band; t++) {
-        const row = (d0 + t * dt) * 4;
-        for (let s = 0; s < along; s++) mixPixel(buf, row + s * 4, o4, mask[s * band + t] * maxW);
-      }
-    } else {
-      for (let s = 0; s < along; s++) {
-        const row = s * band;
-        for (let t = 0; t < band; t++) mixPixel(buf, (d0 + t * dt + s * ds) * 4, o4, mask[row + t] * maxW);
-      }
-    }
+    const weighted = mask.map((value) => value * maxW);
+    blendBand(buf, along, band, weighted, (s, t) => d0 + t * dt + s * ds, off);
   }
   return clipped;
 }
 
-function mixPixel(buf, d, o4, m) {
-  if (m <= 0) return;
-  const o = d + o4;
-  buf[d] += (buf[o] - buf[d]) * m;
-  buf[d + 1] += (buf[o + 1] - buf[d + 1]) * m;
-  buf[d + 2] += (buf[o + 2] - buf[d + 2]) * m;
-  buf[d + 3] += (buf[o + 3] - buf[d + 3]) * m;
+function boxMean(src, along, band, radius) {
+  const tmp = new Float32Array(along * band);
+  const out = new Float32Array(along * band);
+  for (let s = 0; s < along; s++) {
+    for (let t = 0; t < band; t++) {
+      let sum = 0;
+      let n = 0;
+      const from = Math.max(0, t - radius);
+      const to = Math.min(band - 1, t + radius);
+      for (let k = from; k <= to; k++) { sum += src[s * band + k]; n++; }
+      tmp[s * band + t] = sum / n;
+    }
+  }
+  for (let t = 0; t < band; t++) {
+    for (let s = 0; s < along; s++) {
+      let sum = 0;
+      let n = 0;
+      const from = Math.max(0, s - radius);
+      const to = Math.min(along - 1, s + radius);
+      for (let k = from; k <= to; k++) { sum += tmp[k * band + t]; n++; }
+      out[s * band + t] = sum / n;
+    }
+  }
+  return out;
+}
+
+// The mean blends linearly. The detail is scaled back up so averaging two textures does not wash the band out.
+function blendBand(buf, along, band, mask, indexAt, off) {
+  const radius = 4;
+  const o4 = off * 4;
+  for (let channel = 0; channel < 4; channel++) {
+    const dest = new Float32Array(along * band);
+    const src = new Float32Array(along * band);
+    for (let s = 0; s < along; s++) {
+      for (let t = 0; t < band; t++) {
+        const d = indexAt(s, t) * 4 + channel;
+        dest[s * band + t] = buf[d];
+        src[s * band + t] = buf[d + o4];
+      }
+    }
+    const meanD = boxMean(dest, along, band, radius);
+    const meanS = boxMean(src, along, band, radius);
+    for (let s = 0; s < along; s++) {
+      for (let t = 0; t < band; t++) {
+        const m = mask[s * band + t];
+        if (m <= 0) continue;
+        const i = s * band + t;
+        const mean = meanD[i] * (1 - m) + meanS[i] * m;
+        const scale = Math.sqrt((1 - m) * (1 - m) + m * m) || 1;
+        const detail = ((dest[i] - meanD[i]) * (1 - m) + (src[i] - meanS[i]) * m) / scale;
+        const d = indexAt(s, t) * 4 + channel;
+        buf[d] = Math.max(0, Math.min(255, mean + detail));
+      }
+    }
+  }
+}
+
+function reflectIndex(i, n) {
+  const m = n * 2;
+  let k = i % m;
+  if (k < 0) k += m;
+  return k < n ? k : m - 1 - k;
+}
+
+function boxBlurReflect(src, n, radius) {
+  const tmp = new Float64Array(n * n);
+  const out = new Float64Array(n * n);
+  const span = radius * 2 + 1;
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) sum += src[y * n + reflectIndex(x + k, n)];
+      tmp[y * n + x] = sum / span;
+    }
+  }
+  for (let x = 0; x < n; x++) {
+    for (let y = 0; y < n; y++) {
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) sum += tmp[reflectIndex(y + k, n) * n + x];
+      out[y * n + x] = sum / span;
+    }
+  }
+  return out;
+}
+
+function srgbToLinear(value) {
+  const c = value / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function chromaOf(r, g, b) {
+  const sum = Math.max(r + g + b, 0.0001);
+  return [r / sum, g / sum, b / sum];
+}
+
+// Divides out the broad lighting and the broad contrast, so a tile does not repeat a ramp, a vignette
+// or a side that is harsher than the other. Both fields are a wide blur of cell statistics, so single
+// stones cannot bend them. With picked colors (linear rgb), only cells of a similar chroma are measured.
+function evenBuffer(buf, sw, picks, range, strength) {
+  const h = buf.length / (sw * 4);
+  const n = Math.max(8, Math.min(32, sw, h));
+  const grid = new Float64Array(n * n);
+  const spreadGrid = new Float64Array(n * n);
+  const weights = new Float64Array(n * n).fill(1);
+  const chromas = (picks || []).map((p) => chromaOf(p[0], p[1], p[2]));
+  for (let row = 0; row < n; row++) {
+    const y0 = Math.floor(row * h / n);
+    const y1 = Math.max(y0 + 1, Math.floor((row + 1) * h / n));
+    for (let col = 0; col < n; col++) {
+      const x0 = Math.floor(col * sw / n);
+      const x1 = Math.max(x0 + 1, Math.floor((col + 1) * sw / n));
+      let sum = 0;
+      let sumLog = 0;
+      let sumLog2 = 0;
+      let count = 0;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const i = (y * sw + x) * 4;
+          const luma = 0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2];
+          const logL = Math.log(Math.max(luma / 255, 0.002));
+          sum += luma;
+          sumLog += logL;
+          sumLog2 += logL * logL;
+          r += buf[i];
+          g += buf[i + 1];
+          b += buf[i + 2];
+          count++;
+        }
+      }
+      const logMean = sumLog / count;
+      grid[row * n + col] = Math.log(Math.max(sum / count / 255, 0.002));
+      spreadGrid[row * n + col] = Math.sqrt(Math.max(0, sumLog2 / count - logMean * logMean));
+      if (chromas.length) {
+        const c = chromaOf(srgbToLinear(r / count), srgbToLinear(g / count), srgbToLinear(b / count));
+        const d = Math.min(...chromas.map((p) => Math.hypot(c[0] - p[0], c[1] - p[1], c[2] - p[2])));
+        const t = Math.min(1, Math.max(0, (d - range) / range));
+        weights[row * n + col] = 1 - t * t * (3 - 2 * t);
+      }
+    }
+  }
+  const radius = Math.max(1, Math.round(n / 10));
+  const smooth = (src) => boxBlurReflect(boxBlurReflect(src, n, radius), n, radius);
+  const blend = (src) => {
+    const all = smooth(src);
+    if (!chromas.length) return all;
+    const top = smooth(src.map((v, i) => v * weights[i]));
+    const bottom = smooth(weights);
+    return all.map((v, i) => (top[i] + 0.02 * v) / (bottom[i] + 0.02));
+  };
+  const field = blend(grid);
+  const spread = blend(spreadGrid);
+  let mean = 0;
+  let target = 0;
+  for (let i = 0; i < field.length; i++) { mean += field[i]; target += spread[i]; }
+  mean /= field.length;
+  target /= spread.length;
+  const at = (src, x, y) => {
+    const gy = Math.min(n - 1.0001, Math.max(0, (y + 0.5) / h * n - 0.5));
+    const gy0 = Math.floor(gy);
+    const ty = gy - gy0;
+    const gy1 = Math.min(n - 1, gy0 + 1);
+    const gx = Math.min(n - 1.0001, Math.max(0, (x + 0.5) / sw * n - 0.5));
+    const gx0 = Math.floor(gx);
+    const tx = gx - gx0;
+    const gx1 = Math.min(n - 1, gx0 + 1);
+    const a = src[gy0 * n + gx0];
+    const b = src[gy0 * n + gx1];
+    const c = src[gy1 * n + gx0];
+    const d = src[gy1 * n + gx1];
+    return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
+  };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < sw; x++) {
+      const i = (y * sw + x) * 4;
+      const luma = 0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2];
+      const logL = Math.log(Math.max(luma / 255, 0.002));
+      const sample = at(field, x, y);
+      const local = at(spread, x, y);
+      const amount = chromas.length ? (Number.isFinite(strength) ? strength : 1) : 1;
+      const scale = local > 0.0001 && target > 0.0001 ? Math.min(2, Math.max(0.5, target / local)) : 1;
+      const gain = Math.min(4, Math.max(0.25, Math.exp(amount * ((mean - sample) + (logL - sample) * (scale - 1)))));
+      buf[i] = Math.max(0, Math.min(255, buf[i] * gain));
+      buf[i + 1] = Math.max(0, Math.min(255, buf[i + 1] * gain));
+      buf[i + 2] = Math.max(0, Math.min(255, buf[i + 2] * gain));
+    }
+  }
 }
 
 // images: RGBA buffers of W x H, the first one guides the cut. Returns the frame contents of each.
@@ -322,6 +494,7 @@ export function tileImages(images, W, H, frame, sides, opts) {
   });
   const fx = mL;
   const fy = mT;
+  if (opts.even) evenBuffer(bufs[0], sw, opts.lightColors, opts.lightRange, opts.lightStrength);
   const clipped = [];
   const pairX = sides.left.on && sides.right.on ? 0.5 : 1;
   const pairY = sides.up.on && sides.down.on ? 0.5 : 1;

@@ -1,5 +1,6 @@
 import { createEngine, CLASSES } from './pbr.js';
-import { pngBytes, zipStore, downloadBytes, materialDocument, textureLengthFor } from './export.js';
+import { pngBytes, grayPngBytes, zipStore, downloadBytes, materialDocument, textureLengthFor, readProject } from './export.js';
+import { VERSION, versionNewer } from './version.js';
 import {
   findRepeat, autoFrame, tileImages, rotateBuffer, solveLights,
   dominantAngle, homographyFromQuad, warpBuffer, seamScore,
@@ -7,7 +8,7 @@ import {
 import { createTileEditor, coverScale } from './tile-editor.js';
 
 const LANGUAGES = [
-  ['en-US', 'English'], ['pl_PL', 'Polski'], ['es_ES', 'Español'], ['de_DE', 'Deutsch'], ['it_IT', 'Italiano'],
+  ['en_US', 'English'], ['pl_PL', 'Polski'], ['es_ES', 'Español'], ['de_DE', 'Deutsch'], ['it_IT', 'Italiano'],
 ];
 const LANGUAGE_KEY = 'mw-language';
 
@@ -30,24 +31,22 @@ function pickLanguage() {
 }
 
 let language = pickLanguage();
-const copy = await (await fetch(new URL('./content.json', import.meta.url))).json();
-let translation = {};
-if (language !== LANGUAGES[0][0]) {
+
+async function fetchTranslation(code) {
   try {
-    translation = await (await fetch(new URL('./locales/' + language + '/main.translation.json', import.meta.url))).json();
-  } catch (e) { /* fall back to English */ }
+    return await (await fetch(new URL('./locales/' + code + '/main.translation.json', import.meta.url))).json();
+  } catch (e) {
+    return {};
+  }
 }
+
+const english = await fetchTranslation(LANGUAGES[0][0]);
+let translation = language === LANGUAGES[0][0] ? english : await fetchTranslation(language);
 document.documentElement.lang = language.slice(0, 2);
 
 function text(key, vars) {
   let value = translation[key];
-  if (typeof value !== 'string' || !value) {
-    value = copy;
-    for (const part of String(key).split('.')) {
-      if (value == null) return '';
-      value = value[part];
-    }
-  }
+  if (typeof value !== 'string' || !value) value = english[key];
   if (typeof value !== 'string') return '';
   if (!vars) return value;
   return value.replace(/\{(\w+)\}/g, (match, name) => (vars[name] == null ? match : String(vars[name])));
@@ -64,7 +63,7 @@ function fillCopy(root) {
     if (node.tagName === 'BUTTON' && !node.dataset.label) node.setAttribute('aria-label', value);
   });
   root.querySelectorAll('[data-label]').forEach((node) => {
-    const vars = node.dataset.labelSlot ? { name: text('slots.' + node.dataset.labelSlot) } : null;
+    const vars = node.dataset.labelSlot ? { name: text('ui.materialWizard.slots.' + node.dataset.labelSlot) } : null;
     node.setAttribute('aria-label', text(node.dataset.label, vars));
   });
   root.querySelectorAll('[data-placeholder]').forEach((node) => {
@@ -73,7 +72,7 @@ function fillCopy(root) {
 }
 
 fillCopy(document);
-document.title = text('pageTitle');
+document.title = text('ui.materialWizard.pageTitle');
 paintRanges();
 
 const languageSelect = document.getElementById('language');
@@ -86,24 +85,19 @@ languageSelect.addEventListener('change', () => {
 let languageToken = 0;
 async function applyLanguage(code) {
   const token = ++languageToken;
-  let next = {};
-  if (code !== LANGUAGES[0][0]) {
-    try {
-      next = await (await fetch(new URL('./locales/' + code + '/main.translation.json', import.meta.url))).json();
-    } catch (e) { /* fall back to English */ }
-  }
+  const next = code === LANGUAGES[0][0] ? english : await fetchTranslation(code);
   if (token !== languageToken) return;
   language = code;
   translation = next;
   document.documentElement.lang = language.slice(0, 2);
   fillCopy(document);
-  document.title = text('pageTitle');
+  document.title = text('ui.materialWizard.pageTitle');
   refreshLanguage();
 }
 
 function refreshLanguage() {
   document.querySelectorAll('[data-file-name]').forEach((el) => {
-    if (!slotImages[el.dataset.fileName]) el.textContent = text('maps.choose');
+    if (!slotImages[el.dataset.fileName]) el.textContent = text('ui.materialWizard.maps.choose');
   });
   fillPresetList(presetList.value);
   if (repeatInfo) showRepeat();
@@ -126,10 +120,10 @@ const SLOTS = [
 
 // The game multiplies each of these maps by the material's factor (normal: scales the xy of the decoded normal).
 const FACTOR_SLOTS = {
-  normal: { copy: 'maps.strength', max: 2 },
-  roughness: { copy: 'maps.factor', max: 1 },
-  metallic: { copy: 'maps.factor', max: 1 },
-  opacity: { copy: 'maps.factor', max: 1 },
+  normal: { copy: 'ui.materialWizard.maps.strength', max: 2 },
+  roughness: { copy: 'ui.materialWizard.maps.factor', max: 1 },
+  metallic: { copy: 'ui.materialWizard.maps.factor', max: 1 },
+  opacity: { copy: 'ui.materialWizard.maps.factor', max: 1 },
 };
 
 const canvas = document.getElementById('view');
@@ -137,7 +131,10 @@ let engine = createEngine(canvas);
 const drop = document.getElementById('drop');
 const warningsEl = document.getElementById('warnings');
 let original = null;
-let pickWhite = false;
+let photoBytes = null;
+let photoName = null;
+let sessionNote = '';
+let picker = null;
 let repeatInfo = null;
 let repeatSize = null;
 let lights = [];
@@ -434,8 +431,8 @@ STRIP.forEach((view) => {
   stripThumbs[view] = c;
   button.appendChild(c);
   const span = document.createElement('span');
-  span.dataset.copy = 'strip.' + view;
-  span.textContent = text('strip.' + view);
+  span.dataset.copy = 'ui.materialWizard.strip.' + view;
+  span.textContent = text('ui.materialWizard.strip.' + view);
   button.appendChild(span);
   stripHost.appendChild(button);
 });
@@ -447,7 +444,7 @@ stripHost.addEventListener('click', (event) => {
 function showView(view) {
   viewSelect.value = view;
   zoomInput.min = String(zoomMin());
-  zoomInput.dataset.title = view === 'preview' ? 'preview.zoomTip' : 'zoomTip';
+  zoomInput.dataset.title = view === 'preview' ? 'ui.materialWizard.preview.zoomTip' : 'ui.materialWizard.zoomTip';
   zoomInput.title = text(zoomInput.dataset.title);
   const tip = document.getElementById('lit-tip');
   if (tip) tip.hidden = view !== 'preview';
@@ -455,7 +452,10 @@ function showView(view) {
   drawSunDial();
   syncViewButtons();
   if (viewZoom.zoom < zoomMin()) setZoom(viewZoom.zoom);
-  else presentCurrent();
+  else {
+    clampZoom();
+    presentCurrent();
+  }
 }
 
 function syncViewButtons() {
@@ -464,30 +464,36 @@ function syncViewButtons() {
 
 const slotHost = document.getElementById('slots');
 SLOTS.forEach(([name, flat]) => {
-  const label = text('slots.' + name);
+  const label = text('ui.materialWizard.slots.' + name);
+  const modes = name === 'albedo'
+    ? [['load', 'ui.materialWizard.modes.image'], ['flat', 'ui.materialWizard.modes.flat']]
+    : [['generate', 'ui.materialWizard.modes.generate'], ['load', 'ui.materialWizard.modes.load'], ['flat', 'ui.materialWizard.modes.flat']];
   const box = document.createElement('div');
   box.className = 'mw-slot';
   box.dataset.slot = name;
-  box.innerHTML = '<button type="button" class="mw-thumb mw-slot-thumb" data-view="' + VIEW_OF_SLOT[name] + '" data-title="maps.show" title="' + text('maps.show') + '"></button>'
+  box.innerHTML = '<button type="button" class="mw-thumb mw-slot-thumb" data-view="' + VIEW_OF_SLOT[name] + '" data-title="ui.materialWizard.maps.show" title="' + text('ui.materialWizard.maps.show') + '"></button>'
     + '<div class="mw-slot-body">'
-    + '<div class="mw-slot-head"><h3 data-copy="slots.' + name + '">' + label + '</h3>'
-    + '<button type="button" class="mw-save mw-round" data-save="' + name + '" data-title="maps.save" data-label="maps.saveAs" data-label-slot="' + name + '" title="' + text('maps.save') + '" aria-label="' + text('maps.saveAs', { name: label }) + '"><i class="fa-solid fa-download"></i></button></div>'
+    + '<div class="mw-slot-head"><h3 data-copy="ui.materialWizard.slots.' + name + '">' + label + '</h3>'
+    + '<button type="button" class="mw-save mw-round" data-save="' + name + '" data-title="ui.materialWizard.maps.save" data-label="ui.materialWizard.maps.saveAs" data-label-slot="' + name + '" title="' + text('ui.materialWizard.maps.save') + '" aria-label="' + text('ui.materialWizard.maps.saveAs', { name: label }) + '"><i class="fa-solid fa-download"></i></button></div>'
     + '<div class="mw-seg" data-seg="' + name + '">'
-    + '<button type="button" data-mode="generate" data-copy="modes.generate">' + text('modes.generate') + '</button><button type="button" data-mode="load" data-copy="modes.load">' + text('modes.load') + '</button><button type="button" data-mode="flat" data-copy="modes.flat">' + text('modes.flat') + '</button>'
+    + modes.map(([mode, key]) => '<button type="button" data-mode="' + mode + '" data-copy="' + key + '">' + text(key) + '</button>').join('')
     + '</div>'
-    + '<select class="mw-hidden" data-slot-mode="' + name + '"><option value="generate" data-copy="modes.generate">' + text('modes.generate') + '</option><option value="load" data-copy="modes.load">' + text('modes.load') + '</option><option value="flat" data-copy="modes.flat">' + text('modes.flat') + '</option></select>'
+    + '<select class="mw-hidden" data-slot-mode="' + name + '">'
+    + modes.map(([mode, key]) => '<option value="' + mode + '" data-copy="' + key + '">' + text(key) + '</option>').join('')
+    + '</select>'
     + '<div class="mw-row" data-when="load">'
-    + '<label class="mw-file"><input type="file" data-slot-file="' + name + '" accept="image/*"><span data-file-name="' + name + '">' + text('maps.choose') + '</span></label>'
-    + '<select data-slot-channel="' + name + '" data-title="maps.channel" title="' + text('maps.channel') + '"><option value="rgb">RGB</option><option value="luma">luma</option><option value="r"' + (COLOR_SLOTS.includes(name) ? '' : ' selected') + '>R</option><option value="g">G</option><option value="b">B</option><option value="a">A</option></select>'
-    + '<label class="mw-check"><input type="checkbox" data-slot-invert="' + name + '"> <span data-copy="maps.invert">' + text('maps.invert') + '</span></label>'
+    + '<label class="mw-file"><input type="file" data-slot-file="' + name + '" accept="image/*"><span data-file-name="' + name + '">' + text('ui.materialWizard.maps.choose') + '</span></label>'
+    + (name === 'albedo' ? ''
+      : '<select data-slot-channel="' + name + '" data-title="ui.materialWizard.maps.channel" title="' + text('ui.materialWizard.maps.channel') + '"><option value="rgb">RGB</option><option value="luma">luma</option><option value="r"' + (COLOR_SLOTS.includes(name) ? '' : ' selected') + '>R</option><option value="g">G</option><option value="b">B</option><option value="a">A</option></select>'
+        + '<label class="mw-check"><input type="checkbox" data-slot-invert="' + name + '"> <span data-copy="ui.materialWizard.maps.invert">' + text('ui.materialWizard.maps.invert') + '</span></label>')
     + '</div>'
     + (name === 'albedo'
-      ? '<label class="mw-field" data-title="maps.colorTip" title="' + text('maps.colorTip') + '"><span data-copy="maps.color">' + text('maps.color') + '</span>'
+      ? '<label class="mw-field" data-title="ui.materialWizard.maps.colorTip" title="' + text('ui.materialWizard.maps.colorTip') + '"><span data-copy="ui.materialWizard.maps.color">' + text('ui.materialWizard.maps.color') + '</span>'
         + '<input type="color" data-slot-color="albedo" value="#ffffff"></label>'
-      : '<label class="mw-field" data-when="flat"><span data-copy="maps.value">' + text('maps.value') + '</span>'
+      : '<label class="mw-field" data-when="flat"><span data-copy="ui.materialWizard.maps.value">' + text('ui.materialWizard.maps.value') + '</span>'
         + '<input type="range" data-slot-flat="' + name + '" min="0" max="1" step="0.01" value="' + flat + '"></label>')
     + (FACTOR_SLOTS[name]
-      ? '<label class="mw-field" data-title="maps.factorTip" title="' + text('maps.factorTip') + '"><span data-copy="' + FACTOR_SLOTS[name].copy + '">' + text(FACTOR_SLOTS[name].copy) + '</span>'
+      ? '<label class="mw-field" data-title="ui.materialWizard.maps.factorTip" title="' + text('ui.materialWizard.maps.factorTip') + '"><span data-copy="' + FACTOR_SLOTS[name].copy + '">' + text(FACTOR_SLOTS[name].copy) + '</span>'
         + '<input type="range" data-slot-factor="' + name + '" min="0" max="' + FACTOR_SLOTS[name].max + '" step="0.01" value="1"></label>'
       : '')
     + '</div>';
@@ -523,77 +529,162 @@ function syncSlot(name) {
   const box = slotHost.querySelector('[data-slot="' + name + '"]');
   box.querySelectorAll('[data-mode]').forEach((el) => el.classList.toggle('is-active', el.dataset.mode === mode));
   box.querySelectorAll('[data-when]').forEach((el) => el.classList.toggle('mw-hidden', el.dataset.when !== mode));
+  document.querySelectorAll('[data-load-detail="' + name + '"]').forEach((el) => { el.hidden = mode !== 'load'; });
 }
 SLOTS.forEach(([name]) => syncSlot(name));
 const orm = document.createElement('div');
 orm.className = 'mw-actions mw-orm';
-orm.innerHTML = '<label class="mw-text"><span data-copy="maps.unpack">' + text('maps.unpack') + '</span> <input type="file" id="orm-file" accept="image/*"></label>'
-  + '<select id="orm-order"><option value="orm" data-copy="maps.orm">' + text('maps.orm') + '</option><option value="arm" data-copy="maps.rma">' + text('maps.rma') + '</option></select>';
+orm.innerHTML = '<label class="mw-text"><span data-copy="ui.materialWizard.maps.unpack">' + text('ui.materialWizard.maps.unpack') + '</span> <input type="file" id="orm-file" accept="image/*"></label>'
+  + '<select id="orm-order"><option value="orm" data-copy="ui.materialWizard.maps.orm">' + text('ui.materialWizard.maps.orm') + '</option><option value="arm" data-copy="ui.materialWizard.maps.rma">' + text('ui.materialWizard.maps.rma') + '</option></select>';
 slotHost.appendChild(orm);
 
-const classHost = document.getElementById('class-presets');
-Object.keys(CLASSES).forEach((name) => {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.dataset.copy = 'classes.' + name;
-  button.textContent = text('classes.' + name) || name;
-  button.addEventListener('click', () => {
-    remember();
-    document.querySelectorAll('[data-region-class]').forEach((select) => {
-      select.value = name;
-      setRegionMetal(select);
-    });
-    commit();
-    schedule();
-  });
-  classHost.appendChild(button);
-});
+const ZONE_COUNT = 6;
+const zoneHost = document.getElementById('zones');
 
-function setRegionMetal(select) {
-  const slider = document.querySelector('[data-region-metal="' + select.dataset.regionClass + '"]');
-  slider.value = CLASSES[select.value].metal;
+function zoneEl(i, field) {
+  return zoneHost.querySelector('[data-zone="' + i + '"][data-zone-field="' + field + '"]');
 }
 
-const regionHost = document.getElementById('region-classes');
-const metalHost = document.getElementById('region-metal');
-for (let i = 0; i < 4; i++) {
-  const label = document.createElement('label');
-  label.className = 'mw-field';
-  const nameSpan = document.createElement('span');
-  nameSpan.dataset.copy = 'surface.region';
-  nameSpan.dataset.n = String(i + 1);
-  nameSpan.textContent = text('surface.region', { n: i + 1 });
-  label.appendChild(nameSpan);
-  const select = document.createElement('select');
-  select.dataset.regionClass = String(i);
-  Object.keys(CLASSES).forEach((name) => {
-    const option = document.createElement('option');
-    option.value = name;
-    option.dataset.copy = 'classes.' + name;
-    option.textContent = text('classes.' + name) || name;
-    select.appendChild(option);
+function zoneSlider(i, field, copy, min, max, value, tip) {
+  return '<label class="mw-field"' + (tip ? ' data-title="' + tip + '"' : '') + '><span data-copy="' + copy + '"></span>'
+    + '<input type="range" data-zone="' + i + '" data-zone-field="' + field + '" min="' + min + '" max="' + max + '" step="0.01" value="' + value + '"></label>';
+}
+
+function zoneClassSelect(i) {
+  return '<label class="mw-field"><span data-copy="ui.materialWizard.surface.material"></span><select data-zone="' + i + '" data-zone-field="class">'
+    + Object.keys(CLASSES).map((name) => '<option value="' + name + '" data-copy="ui.materialWizard.classes.' + name + '"></option>').join('')
+    + '</select></label>';
+}
+
+for (let i = 0; i <= ZONE_COUNT; i++) {
+  const row = document.createElement('div');
+  row.className = 'mw-zone';
+  row.dataset.zoneRow = String(i);
+  row.innerHTML = i === 0
+    ? '<h3 data-copy="ui.materialWizard.surface.base"></h3>' + zoneClassSelect(0)
+      + zoneSlider(0, 'rough', 'ui.materialWizard.surface.roughness', 0, 1, 0.85)
+      + zoneSlider(0, 'metal', 'ui.materialWizard.surface.metallic', 0, 1, 0)
+    : '<div class="mw-slot-head"><h3 data-copy="ui.materialWizard.surface.zone" data-n="' + i + '"></h3>'
+      + '<input type="checkbox" class="mw-hidden" data-zone="' + i + '" data-zone-field="on">'
+      + '<button type="button" class="mw-round" data-zone-remove="' + i + '" data-title="ui.materialWizard.surface.removeZone"><i class="fa-solid fa-xmark"></i></button></div>'
+      + '<div class="mw-row"><label class="mw-text"><span data-copy="ui.materialWizard.surface.zoneColor"></span> '
+      + '<input type="color" data-zone="' + i + '" data-zone-field="color" value="#808080"></label>'
+      + '<button type="button" data-zone-pick="' + i + '" data-copy="ui.materialWizard.surface.pick"></button></div>'
+      + zoneSlider(i, 'range', 'ui.materialWizard.surface.range', 0.02, 0.6, 0.2, 'ui.materialWizard.surface.rangeTip')
+      + zoneClassSelect(i)
+      + zoneSlider(i, 'rough', 'ui.materialWizard.surface.roughness', 0, 1, 0.85)
+      + zoneSlider(i, 'metal', 'ui.materialWizard.surface.metallic', 0, 1, 0)
+      + zoneSlider(i, 'opacity', 'ui.materialWizard.surface.zoneOpacity', 0, 1, 1);
+  zoneHost.appendChild(row);
+}
+const zonesHead = document.createElement('h3');
+zonesHead.className = 'mw-sub';
+zonesHead.dataset.copy = 'ui.materialWizard.surface.zones';
+zoneHost.insertBefore(zonesHead, zoneHost.querySelector('[data-zone-row="1"]'));
+fillCopy(zoneHost);
+zoneEl(0, 'class').value = 'asphalt';
+
+function syncZones() {
+  for (let i = 1; i <= ZONE_COUNT; i++) {
+    zoneHost.querySelector('[data-zone-row="' + i + '"]').hidden = !zoneEl(i, 'on').checked;
+  }
+}
+syncZones();
+armResets(document.body);
+syncResets();
+
+function controlDefault(el) {
+  if (el.tagName === 'SELECT') {
+    const chosen = [...el.options].find((option) => option.defaultSelected);
+    return chosen ? chosen.value : el.options[0].value;
+  }
+  return el.defaultValue;
+}
+
+function armResets(root) {
+  root.querySelectorAll('.mw-field, .mw-text').forEach((label) => {
+    const el = label.querySelector('input[type="range"], input[type="number"], select');
+    if (!el || label.querySelector('.mw-reset')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mw-reset mw-round';
+    button.hidden = true;
+    button.dataset.title = 'ui.materialWizard.resetSetting';
+    button.innerHTML = '<i class="fa-solid fa-rotate-left"></i>';
+    label.insertBefore(button, el);
   });
-  select.value = ['asphalt', 'concrete', 'dirt', 'paint'][i];
-  label.appendChild(select);
-  regionHost.appendChild(label);
-  const metal = document.createElement('label');
-  metal.className = 'mw-field';
-  metal.dataset.regionMetalRow = String(i);
-  const metalName = document.createElement('span');
-  metalName.dataset.copy = 'surface.regionMetal';
-  metalName.dataset.n = String(i + 1);
-  metalName.textContent = text('surface.regionMetal', { n: i + 1 });
-  metal.appendChild(metalName);
-  const slider = document.createElement('input');
-  slider.type = 'range';
-  slider.min = '0';
-  slider.max = '1';
-  slider.step = '0.01';
-  slider.dataset.regionMetal = String(i);
-  metal.appendChild(slider);
-  metalHost.appendChild(metal);
-  setRegionMetal(select);
-  select.addEventListener('input', () => setRegionMetal(select));
+  fillCopy(root);
+}
+
+function syncResets() {
+  document.querySelectorAll('.mw-reset').forEach((button) => {
+    const el = button.parentElement.querySelector('input[type="range"], input[type="number"], select');
+    button.hidden = !el || String(el.value) === String(controlDefault(el));
+  });
+}
+
+function resetControl(el) {
+  remember();
+  el.value = controlDefault(el);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+document.body.addEventListener('click', (event) => {
+  const button = event.target.closest('.mw-reset');
+  if (!button) return;
+  const el = button.parentElement.querySelector('input[type="range"], input[type="number"], select');
+  if (el) resetControl(el);
+});
+document.body.addEventListener('dblclick', (event) => {
+  if (event.target.closest('input, select, button')) return;
+  const label = event.target.closest('.mw-field, .mw-text');
+  const el = label && label.querySelector('input[type="range"], input[type="number"], select');
+  if (el && String(el.value) !== String(controlDefault(el))) resetControl(el);
+});
+
+zoneHost.addEventListener('input', (event) => {
+  const el = event.target;
+  if (el.dataset.zoneField !== 'class') return;
+  const info = CLASSES[el.value];
+  zoneEl(el.dataset.zone, 'rough').value = info.rough;
+  zoneEl(el.dataset.zone, 'metal').value = info.metal;
+  paintRange(zoneEl(el.dataset.zone, 'rough'));
+  paintRange(zoneEl(el.dataset.zone, 'metal'));
+});
+zoneHost.addEventListener('click', (event) => {
+  const remove = event.target.closest('[data-zone-remove]');
+  if (remove) {
+    remember();
+    zoneEl(remove.dataset.zoneRemove, 'on').checked = false;
+    syncZones();
+    commit();
+    schedule();
+    return;
+  }
+  const pick = event.target.closest('[data-zone-pick]');
+  if (pick) startPick(pick, Number(pick.dataset.zonePick));
+});
+document.getElementById('add-zone').addEventListener('click', () => {
+  for (let i = 1; i <= ZONE_COUNT; i++) {
+    if (zoneEl(i, 'on').checked) continue;
+    remember();
+    zoneEl(i, 'on').checked = true;
+    syncZones();
+    commit();
+    schedule();
+    return;
+  }
+});
+
+function readZones() {
+  const num01 = (i, field) => num(zoneEl(i, field).value, 0);
+  const zones = [];
+  for (let i = 1; i <= ZONE_COUNT; i++) {
+    if (!zoneEl(i, 'on').checked) continue;
+    zones.push({ color: hexLinear(zoneEl(i, 'color').value), range: num01(i, 'range'), rough: num01(i, 'rough'), metal: num01(i, 'metal'), opacity: num01(i, 'opacity') });
+  }
+  return { base: [num01(0, 'rough'), num01(0, 'metal')], zones };
 }
 
 document.getElementById('tabs').addEventListener('click', (event) => {
@@ -606,10 +697,20 @@ document.getElementById('tabs').addEventListener('click', (event) => {
     panel.classList.toggle('mw-hidden', !show);
     if (show) enterContent(panel);
   });
-  if (button.dataset.tab === 'preview') showView('preview');
+  if (TAB_VIEW[button.dataset.tab]) showView(TAB_VIEW[button.dataset.tab]);
+  if (mobile.matches) {
+    const bar = button.parentElement;
+    bar.scrollTo({ left: bar.scrollLeft + button.getBoundingClientRect().left - bar.getBoundingClientRect().left, behavior: 'smooth' });
+  }
   if (wasTile && button.dataset.tab !== 'tile') flushTileWork();
   refreshEditor();
 });
+
+const TAB_VIEW = { albedo: 'albedo', shape: 'height', surface: 'rough' };
+
+document.querySelector('[data-panel="albedo"]').addEventListener('input', (event) => {
+  if (event.target.type === 'range' && event.target.dataset.param !== 'shadowFix' && event.target.dataset.param !== 'lightRange' && event.target.dataset.param !== 'lightStrength') document.querySelector('[data-param="albedoFix"]').checked = true;
+}, true);
 
 function enterContent(panel) {
   Array.from(panel.children).forEach((child, i) => child.style.setProperty('--i', Math.min(i, 10)));
@@ -629,39 +730,45 @@ function hexColor(value) {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
+function hexLinear(value) {
+  return hexColor(value).map((v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+}
+
 function readParams() {
   const params = {
-    delight: 0.65, highlight: 0.8, relief: 0, targetMean: 0.18,
-    heightRelief: 0.35, heightContrast: 1.5, heightBias: 0,
+    delight: 0.65, highlight: 0.8, relief: 0, shadowFix: 0, targetMean: 0.18,
+    evenOut: 0, brightX: 0, brightXPos: 0.5, brightY: 0, brightYPos: 0.5,
+    heightRelief: 0.35, heightContrast: 1.5, heightBias: 0, heightLevel: 0,
     normalStrength: 1, normalSmooth: 0.5, flipY: false, aoDepth: 1, aoContrast: 1, metalWear: 0, metalSharp: 1,
     detailStrength: 0.7, detailCutoff: 0.65, detailAuto: true, detailFlatOnly: 0.35, atlas: false, addDetail: false,
-    addAoDetail: false, aoDetailAmount: 1, addRoughDetail: false, roughDetailAmount: 1, addMetalDetail: false, metalDetailAmount: 1, mapDetailSize: 0.5,
+    addAoDetail: false, aoDetailAmount: 1, aoDetailSize: 0.5, addRoughDetail: false, roughDetailAmount: 1, roughDetailSize: 0.5, addMetalDetail: false, metalDetailAmount: 1, metalDetailSize: 0.5,
     tileOn: false, tileLeft: true, tileRight: false, tileUp: true, tileDown: false,
     leftA: 0.03, leftB: 0.2, rightA: 0.03, rightB: 0.2, upA: 0.03, upB: 0.2, downA: 0.03, downB: 0.2,
-    tileBlend: 'cut', tileSoft: 0.3, crop: '', cropShape: 'auto', roadRuns: 'up', roadWidth: 7,
+    tileBlend: 'cut', tileSoft: 0.3, tileEven: true, crop: '', cropShape: 'auto', roadRuns: 'up', roadWidth: 7,
     cavityRough: 0.25, wearRough: 0.1, microRough: 0.15, specRough: 0.35, nvarRough: 0.2,
-    roughMin: 0.15, roughMax: 0.95, roughContrast: 1, regionCount: 3,
-    opacityEdge: 0, opacityRagged: 0.4, opacityPatch: 0, opacityCrack: 0, opacityRegion: -1,
+    roughMin: 0.15, roughMax: 0.95, roughContrast: 1,
+    opacityEdge: 0, opacityRagged: 0.4, opacityPatch: 0, opacityCrack: 0,
     split: 0, seamLines: false, shape: 'plane', layout: '1x1',
     size: 'source', pot: 'auto', previewSize: '2048', name: 'm_example', folder: '/levels/example/art/textures/',
-    profile: 'level', annotation: 'ASPHALT', alphaRef: 150, delightLoaded: false,
+    profile: 'level', annotation: 'ASPHALT', alphaRef: 150, albedoFix: false,
     whiteBalance: whiteBalance,
+    lightColors: lightColors.map(hexLinear),
   };
   document.querySelectorAll('[data-param]').forEach((el) => {
     const key = el.dataset.param;
     if (el.type === 'checkbox') params[key] = el.checked;
     else if (el.dataset.param === 'size' && el.value === 'source') params.size = 'source';
-    else if (el.type === 'range' || el.type === 'number' || el.dataset.param === 'size' || el.dataset.param === 'alphaRef' || el.dataset.param === 'regionCount' || el.dataset.param === 'opacityRegion' || el.dataset.param === 'roadWidth') {
+    else if (el.type === 'range' || el.type === 'number' || el.dataset.param === 'size' || el.dataset.param === 'alphaRef' || el.dataset.param === 'roadWidth') {
       params[key] = num(el.value, params[key]);
     } else params[key] = el.value;
   });
-  params.opacityRegion = num(document.querySelector('[data-param="opacityRegion"]').value, -1);
   params.tileX = params.tileLeft || params.tileRight;
   params.tileY = params.tileUp || params.tileDown;
   params.heightWeights = [0.2, 0.45, 0.75, 1];
   params.normalWeights = [params.band0, params.band1, params.band2, params.band3].map((v) => num(v, 0.5));
-  params.regionClass = [0, 1, 2, 3].map((i) => document.querySelector('[data-region-class="' + i + '"]').value);
-  params.regionMetal = [0, 1, 2, 3].map((i) => num(document.querySelector('[data-region-metal="' + i + '"]').value, 0));
+  const zones = readZones();
+  params.zoneBase = zones.base;
+  params.zones = zones.zones;
   const flatOf = (slot) => num(document.querySelector('[data-slot-flat="' + slot + '"]').value, 0.5);
   params.flatColor = hexColor(document.querySelector('[data-slot-color="albedo"]').value);
   const factorOf = (slot) => num(document.querySelector('[data-slot-factor="' + slot + '"]').value, 1);
@@ -691,9 +798,29 @@ function readParams() {
 }
 
 let whiteBalance = null;
+let lightColors = [];
+const LIGHT_COLORS_MAX = 4;
+
+const lightHost = document.getElementById('light-colors');
+
+function renderLightColors() {
+  lightHost.innerHTML = '';
+  lightColors.forEach((hex, i) => {
+    const swatch = document.createElement('button');
+    swatch.type = 'button';
+    swatch.className = 'mw-swatch';
+    swatch.style.background = hex;
+    swatch.dataset.lightRemove = String(i);
+    swatch.title = text('ui.materialWizard.albedo.lightRemove');
+    lightHost.appendChild(swatch);
+  });
+  const picked = lightColors.length > 0;
+  document.getElementById('light-options').classList.toggle('mw-hidden', !picked);
+  document.getElementById('clear-light').classList.toggle('mw-hidden', !picked);
+}
 
 const HISTORY_LIMIT = 30;
-const HISTORY_CONTROL = '[data-param], [data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-slot-color], [data-slot-factor], [data-region-class], [data-region-metal], #quad, #orm-order';
+const HISTORY_CONTROL = '[data-param], [data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-slot-color], [data-slot-factor], [data-zone], #quad, #orm-order';
 const undoStack = [];
 const redoStack = [];
 let restoring = false;
@@ -714,6 +841,7 @@ function writeControls(values) {
     if (el.type === 'checkbox') el.checked = values[i];
     else el.value = values[i];
   });
+  syncResets();
 }
 
 function takeSnapshot() {
@@ -723,16 +851,20 @@ function takeSnapshot() {
     original,
     slots: Object.assign({}, slotImages),
     whiteBalance: whiteBalance ? whiteBalance.slice() : null,
+    lightColors: lightColors.slice(),
     lights: lights.map((light) => ({ image: light.image, az: light.az, el: light.el })),
     mask: document.getElementById('mask-file')._image || null,
     names,
     controls: readControls(),
+    photoBytes,
+    photoName,
   };
 }
 
 function sameSnapshot(a, b) {
   if (a.original !== b.original || a.mask !== b.mask) return false;
   if ((a.whiteBalance || []).join() !== (b.whiteBalance || []).join()) return false;
+  if (a.lightColors.join() !== b.lightColors.join()) return false;
   if (a.controls.length !== b.controls.length) return false;
   for (let i = 0; i < a.controls.length; i++) if (a.controls[i] !== b.controls[i]) return false;
   const keys = Object.keys(a.slots);
@@ -769,14 +901,19 @@ function clearThumbs() {
 function applySnapshot(snap) {
   restoring = true;
   original = snap.original;
+  photoBytes = snap.photoBytes || null;
+  photoName = snap.photoName || null;
   Object.keys(slotImages).forEach((key) => delete slotImages[key]);
   Object.assign(slotImages, snap.slots);
   whiteBalance = snap.whiteBalance ? snap.whiteBalance.slice() : null;
+  lightColors = snap.lightColors.slice();
+  renderLightColors();
   lights = snap.lights.map((light) => ({ image: light.image, az: light.az, el: light.el }));
   document.getElementById('mask-file')._image = snap.mask;
   writeControls(snap.controls);
+  syncZones();
   document.querySelectorAll('[data-file-name]').forEach((el) => {
-    el.textContent = snap.names[el.dataset.fileName] || text('maps.choose');
+    el.textContent = snap.names[el.dataset.fileName] || text('ui.materialWizard.maps.choose');
   });
   SLOTS.forEach(([name]) => syncSlot(name));
   drawLights();
@@ -810,7 +947,55 @@ function redo() {
 function syncHistoryButtons() {
   document.getElementById('undo').disabled = undoStack.length === 0;
   document.getElementById('redo').disabled = redoStack.length === 0;
+  appbar.querySelector('[data-app="undo"]').disabled = undoStack.length === 0;
+  appbar.querySelector('[data-app="redo"]').disabled = redoStack.length === 0;
 }
+
+const appbar = document.getElementById('appbar');
+const mobile = window.matchMedia('(max-width: 900px)');
+let compareView = null;
+appbar.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-app]');
+  if (!button) return;
+  const action = button.dataset.app;
+  if (action === 'open') pickAndOpen();
+  else if (action === 'undo') undo();
+  else if (action === 'redo') redo();
+  else if (action === 'download') document.getElementById('download').click();
+  else if (action === 'more') {
+    document.body.classList.toggle('mw-more-open');
+    document.body.style.setProperty('--mw-appbar-h', appbar.offsetHeight + 'px');
+  }
+});
+const compareButton = appbar.querySelector('[data-app="compare"]');
+compareButton.addEventListener('pointerdown', () => {
+  if (compareView || !original) return;
+  compareView = viewSelect.value;
+  showView('source');
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach((type) => compareButton.addEventListener(type, () => {
+  if (!compareView) return;
+  showView(compareView);
+  compareView = null;
+}));
+
+let swipeFrom = null;
+const tabOrder = () => Array.from(document.querySelectorAll('#tabs [data-tab]'));
+document.querySelector('.mw-page > aside').addEventListener('pointerdown', (event) => {
+  swipeFrom = mobile.matches && !event.target.closest('input, select, textarea, canvas, .mw-tabs')
+    ? { x: event.clientX, y: event.clientY } : null;
+});
+document.querySelector('.mw-page > aside').addEventListener('pointerup', (event) => {
+  if (!swipeFrom) return;
+  const dx = event.clientX - swipeFrom.x;
+  const dy = event.clientY - swipeFrom.y;
+  swipeFrom = null;
+  if (Math.abs(dx) < 60 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+  const tabs = tabOrder();
+  const index = tabs.findIndex((tab) => tab.classList.contains('is-active'));
+  const next = tabs[index + (dx < 0 ? 1 : -1)];
+  if (next) next.click();
+});
 
 document.getElementById('undo').addEventListener('click', undo);
 document.getElementById('redo').addEventListener('click', redo);
@@ -874,24 +1059,34 @@ function readPreset() {
   document.querySelectorAll(SLOT_CONTROLS).forEach((el) => {
     values['s:' + slotControlKey(el)] = controlValue(el);
   });
-  document.querySelectorAll('[data-region-class], [data-region-metal]').forEach((el) => {
-    const kind = el.dataset.regionClass != null ? 'class' : 'metal';
-    values['r:' + kind + ':' + (el.dataset.regionClass || el.dataset.regionMetal)] = controlValue(el);
+  document.querySelectorAll('[data-zone]').forEach((el) => {
+    values['z:' + el.dataset.zone + ':' + el.dataset.zoneField] = controlValue(el);
   });
   values.quad = document.getElementById('quad').value;
   values.orm = document.getElementById('orm-order').value;
   return values;
 }
 
+function migrateValues(values) {
+  if (values && values['p:mapDetailSize'] != null) {
+    ['aoDetailSize', 'roughDetailSize', 'metalDetailSize'].forEach((name) => {
+      if (values['p:' + name] == null) values['p:' + name] = values['p:mapDetailSize'];
+    });
+  }
+  return values;
+}
+
 function writePreset(values) {
+  migrateValues(values);
   document.querySelectorAll('[data-param]').forEach((el) => setControl(el, values['p:' + el.dataset.param]));
   document.querySelectorAll(SLOT_CONTROLS).forEach((el) => {
     setControl(el, values['s:' + slotControlKey(el)]);
   });
-  document.querySelectorAll('[data-region-class], [data-region-metal]').forEach((el) => {
-    const kind = el.dataset.regionClass != null ? 'class' : 'metal';
-    setControl(el, values['r:' + kind + ':' + (el.dataset.regionClass || el.dataset.regionMetal)]);
+  document.querySelectorAll('[data-zone]').forEach((el) => {
+    setControl(el, values['z:' + el.dataset.zone + ':' + el.dataset.zoneField]);
   });
+  syncZones();
+  syncResets();
   if (values.quad != null) document.getElementById('quad').value = values.quad;
   if (values.orm != null) document.getElementById('orm-order').value = values.orm;
 }
@@ -907,7 +1102,7 @@ function fillPresetList(selected) {
   presetList.innerHTML = '';
   const none = document.createElement('option');
   none.value = '';
-  none.textContent = text('presets.none');
+  none.textContent = text('ui.materialWizard.presets.none');
   presetList.appendChild(none);
   Object.keys(presets).sort((a, b) => a.localeCompare(b)).forEach((name) => {
     const option = document.createElement('option');
@@ -953,6 +1148,35 @@ document.getElementById('preset-delete').addEventListener('click', () => {
   try { localStorage.setItem(PRESET_KEY, JSON.stringify(presets)); } catch (e) { /* ignore */ }
   presetName.value = '';
   fillPresetList('');
+});
+document.getElementById('preset-export').addEventListener('click', () => {
+  const all = storedPresets();
+  const name = presetList.value;
+  const presets = name ? { [name]: all[name] } : all;
+  if (!Object.keys(presets).length) return;
+  const json = JSON.stringify({ materialWizardPresets: 1, version: VERSION, presets });
+  const file = (name || 'material-wizard-presets').replace(/[^a-z0-9_-]+/gi, '_') + '.mwpreset.json';
+  downloadBytes(new TextEncoder().encode(json), file, 'application/json');
+});
+const presetFile = document.getElementById('preset-file');
+document.getElementById('preset-import').addEventListener('click', () => presetFile.click());
+presetFile.addEventListener('change', async () => {
+  const file = presetFile.files[0];
+  presetFile.value = '';
+  if (!file) return;
+  let incoming = null;
+  try {
+    const parsed = JSON.parse(await file.text());
+    incoming = parsed.presets;
+    if (versionNewer(parsed.version)) sessionNote = text('ui.materialWizard.notes.newerFile', { v: parsed.version });
+  } catch (e) { /* not a preset file */ }
+  if (!incoming || typeof incoming !== 'object') {
+    warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
+    return;
+  }
+  const presets = Object.assign(storedPresets(), incoming);
+  try { localStorage.setItem(PRESET_KEY, JSON.stringify(presets)); } catch (e) { /* ignore */ }
+  fillPresetList(Object.keys(incoming)[0]);
 });
 
 function paintRange(el) {
@@ -1141,6 +1365,11 @@ function zoomMin() {
 }
 
 function clampZoom() {
+  if (viewSelect.value === 'preview') {
+    viewZoom.x = Math.min(1, Math.max(0, viewZoom.x));
+    viewZoom.y = Math.min(1, Math.max(0, viewZoom.y));
+    return;
+  }
   const half = 0.5 / viewZoom.zoom;
   if (half >= 0.5) {
     viewZoom.x = 0.5;
@@ -1288,7 +1517,7 @@ function hideHdr() {
 function syncHdrNote() {
   const show = viewSelect.value === 'preview' && drop.classList.contains('is-hdr');
   hdrNote.hidden = !show;
-  if (show) hdrNote.textContent = text('preview.hdr', { nits: HDR_PEAK });
+  if (show) hdrNote.textContent = text('ui.materialWizard.preview.hdr', { nits: HDR_PEAK });
 }
 
 function presentHdr(frame) {
@@ -1368,7 +1597,7 @@ function runEngine(size, tile, params) {
   uploadPainted((c) => engine.setSource(c), tile.source, size.w, size.h);
   for (const [name] of SLOTS) {
     const mode = document.querySelector('[data-slot-mode="' + name + '"]').value;
-    if (mode === 'load' && slotImages[name]) uploadPainted((c) => engine.setLoaded(mapName(name), c), tile.slots[name], size.w, size.h);
+    if (name !== 'albedo' && mode === 'load' && slotImages[name]) uploadPainted((c) => engine.setLoaded(mapName(name), c), tile.slots[name], size.w, size.h);
     else engine.setLoaded(mapName(name), null);
   }
   const maskFile = document.getElementById('mask-file')._image;
@@ -1386,7 +1615,7 @@ function outputSize(sourceImage, tile, params) {
 
 // Runs fn with the engine at the output size, then goes back to the preview size.
 async function atOutputSize(fn) {
-  if (!(await renderReady())) throw new Error(text('notes.gpuLost'));
+  if (!(await renderReady())) throw new Error(text('ui.materialWizard.notes.gpuLost'));
   const tile = lastRender.tile;
   const params = readParams();
   const sourceImage = tile.source;
@@ -1406,10 +1635,10 @@ async function atOutputSize(fn) {
   if (params.size !== 'source') {
     const aspect = sourceImage.width / sourceImage.height;
     const targetAspect = size.w / size.h;
-    if (targetAspect && Math.abs(aspect - targetAspect) / targetAspect > 0.15) extra.push(text('notes.stretch'));
+    if (targetAspect && Math.abs(aspect - targetAspect) / targetAspect > 0.15) extra.push(text('ui.materialWizard.notes.stretch'));
   }
   if (size.w !== wanted.w || size.h !== wanted.h) {
-    extra.push(text('notes.exportCap', { w: wanted.w, h: wanted.h, sw: size.w, sh: size.h }));
+    extra.push(text('ui.materialWizard.notes.exportCap', { w: wanted.w, h: wanted.h, sw: size.w, sh: size.h }));
   }
   extra.forEach((line) => {
     const p = document.createElement('p');
@@ -1426,7 +1655,7 @@ async function render() {
   syncViewButtons();
   if (!original) return;
   const params = readParams();
-  const loadedNames = SLOTS.map(([name]) => name).filter((name) => slotImages[name] && document.querySelector('[data-slot-mode="' + name + '"]').value === 'load');
+  const loadedNames = SLOTS.map(([name]) => name).filter((name) => name !== 'albedo' && slotImages[name] && document.querySelector('[data-slot-mode="' + name + '"]').value === 'load');
   const tile = tiledSet(params, loadedNames);
   const sourceImage = tile.source;
   const detected = potShape(sourceImage.width, sourceImage.height);
@@ -1437,28 +1666,28 @@ async function render() {
     option.textContent = detected;
     shapeSelect.appendChild(option);
   }
-  shapeSelect.querySelector('[value="auto"]').textContent = detected ? text('maps.autoDetected', { shape: detected }) : text('maps.auto');
+  shapeSelect.querySelector('[value="auto"]').textContent = detected ? text('ui.materialWizard.maps.autoDetected', { shape: detected }) : text('ui.materialWizard.maps.auto');
   shapeSelect.disabled = params.size === 'source' && !detected;
   if (gpuLost) return false;
   const natural = tile.pow2 ? tile.pow2 : workingSize(sourceImage, 'source', params.pot);
   const asked = params.previewSize === 'full' ? Infinity : num(params.previewSize, 2048);
   const work = capSize(natural, Math.min(asked, gpuLimit()));
   const notes = [];
-  if (oomInfo) notes.push(text('notes.gpuOom', oomInfo));
+  if (oomInfo) notes.push(text('ui.materialWizard.notes.gpuOom', oomInfo));
   if (tile.clipped.length) {
-    notes.push(text('notes.tileMargin', { sides: tile.clipped.map((side) => text('notes.sideNames.' + side)).join(', ') }));
+    notes.push(text('ui.materialWizard.notes.tileMargin', { sides: tile.clipped.map((side) => text('ui.materialWizard.notes.sideNames.' + side)).join(', ') }));
   }
   document.getElementById('seam-note').textContent = tile.scores
-    ? text('notes.seam', { x: seamRate(tile.scores.x), y: seamRate(tile.scores.y) })
+    ? text('ui.materialWizard.notes.seam', { x: seamRate(tile.scores.x), y: seamRate(tile.scores.y) })
     : '';
   if (Math.max(work.w, work.h) + 0.5 < Math.min(Math.max(natural.w, natural.h), asked)) {
-    notes.push(text('notes.gpuCap', { w: natural.w, h: natural.h, sw: work.w, sh: work.h }));
+    notes.push(text('ui.materialWizard.notes.gpuCap', { w: natural.w, h: natural.h, sw: work.w, sh: work.h }));
   }
   SLOTS.forEach(([name]) => {
     const stored = slotImages[name];
-    if (stored && document.querySelector('[data-slot-mode="' + name + '"]').value === 'load'
+    if (stored && name !== 'albedo' && document.querySelector('[data-slot-mode="' + name + '"]').value === 'load'
       && (stored.width !== original.width || stored.height !== original.height)) {
-      notes.push(text('notes.resampled', { name: name }));
+      notes.push(text('ui.materialWizard.notes.resampled', { name: name }));
     }
   });
   let warnings;
@@ -1475,14 +1704,19 @@ async function render() {
   const length = textureLengthFor(params.roadWidth, work.w, work.h);
   const factorVars = { rough: params.factors.roughness.toFixed(2), metal: params.factors.metallic.toFixed(2) };
   document.getElementById('scale-note').textContent = params.profile === 'road' || !params.tileX
-    ? text('notes.road', { width: params.roadWidth, length: length.toFixed(2), ...factorVars })
-    : text('notes.factors', factorVars);
+    ? text('ui.materialWizard.notes.road', { width: params.roadWidth, length: length.toFixed(2), ...factorVars })
+    : text('ui.materialWizard.notes.factors', factorVars);
   warningsEl.innerHTML = '';
   notes.concat(warnings).forEach((line) => {
     const p = document.createElement('p');
-    p.textContent = text('notes.' + line) || line;
+    p.textContent = text('ui.materialWizard.notes.' + line) || line;
     warningsEl.appendChild(p);
   });
+  if (sessionNote) {
+    const p = document.createElement('p');
+    p.textContent = sessionNote;
+    warningsEl.appendChild(p);
+  }
   drop.classList.add('has-image');
   refreshEditor();
   return true;
@@ -1553,7 +1787,7 @@ function tileActive(params) {
 }
 
 function tileOpts(params) {
-  return { cut: params.tileBlend === 'cut', soft: params.tileSoft };
+  return { cut: params.tileBlend === 'cut', soft: params.tileSoft, even: params.tileEven !== false, lightColors: params.lightColors, lightRange: params.lightRange, lightStrength: params.lightStrength };
 }
 
 const tileCache = { key: '', result: null };
@@ -1610,9 +1844,17 @@ function previewOf(full) {
   return previewCache;
 }
 
-function tileTabActive() {
+function activeTab() {
   const active = document.querySelector('[data-tab].is-active');
-  return !!active && active.dataset.tab === 'tile';
+  return active ? active.dataset.tab : '';
+}
+
+function tileTabActive() {
+  return activeTab() === 'tile';
+}
+
+function fixTabActive() {
+  return activeTab() === 'fix';
 }
 
 let editorQueued = false;
@@ -1626,13 +1868,13 @@ function refreshEditor() {
 }
 
 function paintEditor() {
-  if (!original || !tileTabActive()) {
+  if (!original || !(tileTabActive() || fixTabActive())) {
     editor.show(null);
     tileBar.hidden = true;
     return;
   }
   const tileSeg = tileBar.querySelector('.mw-seg');
-  if (fixTools.open) {
+  if (fixTabActive()) {
     const preview = previewOf(original);
     tileBar.hidden = false;
     tileSeg.hidden = true;
@@ -1645,7 +1887,7 @@ function paintEditor() {
         quad: readQuad(),
         full: original,
         result: fixMode === 'quad' ? quadResult(preview) : null,
-        labels: { angle: fixAngle().toFixed(1) + '°', result: text('tile.result') },
+        labels: { angle: fixAngle().toFixed(1) + '°', result: text('ui.materialWizard.fix.result') },
       },
     });
     return;
@@ -1681,9 +1923,9 @@ function paintEditor() {
     seamLines: params.seamLines,
     off: !tileActive(params),
     labels: {
-      off: text('tile.offNote'),
-      beyond: { left: text('tile.beyondLeft'), right: text('tile.beyondRight'), up: text('tile.beyondUp'), down: text('tile.beyondDown') },
-      size: text('tile.frameSize', { w: Math.round(frame.w * full.width), h: Math.round(frame.h * full.height) }),
+      off: text('ui.materialWizard.tile.offNote'),
+      beyond: { left: text('ui.materialWizard.tile.beyondLeft'), right: text('ui.materialWizard.tile.beyondRight'), up: text('ui.materialWizard.tile.beyondUp'), down: text('ui.materialWizard.tile.beyondDown') },
+      size: text('ui.materialWizard.tile.frameSize', { w: Math.round(frame.w * full.width), h: Math.round(frame.h * full.height) }),
     },
   });
 }
@@ -1715,16 +1957,15 @@ document.querySelector('.mw-fades').addEventListener('change', (event) => {
 });
 
 function seamRate(value) {
-  if (value == null) return text('notes.seamOff');
+  if (value == null) return text('ui.materialWizard.notes.seamOff');
   const rate = value < 0.04 ? 'seamGood' : value < 0.08 ? 'seamFaint' : 'seamBad';
-  return text('notes.seamRate', { rate: text('notes.' + rate), value: value.toFixed(3) });
+  return text('ui.materialWizard.notes.seamRate', { rate: text('ui.materialWizard.notes.' + rate), value: value.toFixed(3) });
 }
 
 function frameString(frame) {
   return [frame.x, frame.y, frame.w, frame.h].map((v) => v.toFixed(5)).join(',');
 }
 
-const fixTools = document.getElementById('fix-tools');
 const quadInput = document.getElementById('quad');
 const angleInput = document.getElementById('fix-angle');
 const IDENTITY_QUAD = [0, 0, 1, 0, 1, 1, 0, 1];
@@ -1776,7 +2017,6 @@ function rotateFill(image, deg) {
   return c;
 }
 
-fixTools.addEventListener('toggle', refreshEditor);
 document.getElementById('fix-mode').addEventListener('click', (event) => {
   const button = event.target.closest('[data-fix-mode]');
   if (!button) return;
@@ -1793,7 +2033,7 @@ angleInput.addEventListener('input', () => {
 const editor = createTileEditor(drop, {
   onStart() {
     remember();
-    if (fixTools.open) return;
+    if (fixTabActive()) return;
     if (!parseFrame(cropInput.value)) {
       const params = readParams();
       const full = orientedOriginal(params.roadRuns);
@@ -1821,7 +2061,7 @@ const editor = createTileEditor(drop, {
   },
   onEnd() {
     commit();
-    if (fixTools.open) return;
+    if (fixTabActive()) return;
     if (framing) framing = false;
     refreshEditor();
     scheduleTileWork();
@@ -1876,7 +2116,7 @@ canvas.addEventListener('webglcontextlost', (event) => {
     oomCap = Math.max(512, Math.pow(2, Math.floor(Math.log2(Math.max(engine.size().w, engine.size().h) / 2))));
     oomInfo = { size: Math.max(engine.size().w, engine.size().h), cap: oomCap };
   }
-  warningsEl.textContent = text('notes.gpuLost');
+  warningsEl.textContent = text('ui.materialWizard.notes.gpuLost');
 });
 canvas.addEventListener('webglcontextrestored', () => {
   engine = createEngine(canvas);
@@ -1895,6 +2135,7 @@ const slotImages = {};
 
 viewSelect.addEventListener('change', () => showView(viewSelect.value));
 document.body.addEventListener('input', (event) => {
+  syncResets();
   if (event.target.matches('[data-param="size"]')) {
     const shapeSelect = document.querySelector('[data-param="pot"]');
     const image = lastRender && lastRender.tile && lastRender.tile.source;
@@ -1902,7 +2143,7 @@ document.body.addEventListener('input', (event) => {
     shapeSelect.disabled = event.target.value === 'source' && !detected;
     return;
   }
-  if (event.target.matches('[data-param], [data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-slot-color], [data-slot-factor], [data-region-class], [data-region-metal]')) {
+  if (event.target.matches('[data-param], [data-slot-mode], [data-slot-channel], [data-slot-invert], [data-slot-flat], [data-slot-color], [data-slot-factor], [data-zone]')) {
     if (tileTabActive() && TILE_EDIT.has(event.target.dataset.param)) {
       refreshEditor();
       scheduleTileWork();
@@ -1916,9 +2157,11 @@ document.body.addEventListener('change', async (event) => {
   const input = event.target.closest('[data-slot-file]');
   if (!input || !input.files[0]) return;
   const slot = input.dataset.slotFile;
-  const image = await loadImage(input.files[0]);
+  const file = input.files[0];
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const image = await loadImage(new Blob([bytes], { type: file.type || 'image/png' }));
   if (slot === 'albedo') {
-    useImage(image, input.files[0]);
+    useImage(image, file, bytes);
     return;
   }
   remember();
@@ -1939,7 +2182,9 @@ drop.addEventListener('click', () => { if (!original) openFile.click(); });
 openFile.addEventListener('change', async () => {
   const file = openFile.files[0];
   openFile.value = '';
-  if (file) useImage(await loadImage(file), file);
+  if (!file) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  useImage(await loadImage(new Blob([bytes], { type: file.type || 'image/png' })), file, bytes);
 });
 
 function nameFromFile(file) {
@@ -1952,18 +2197,27 @@ function setNameFrom(file) {
   if (name) document.querySelector('[data-param="name"]').value = name;
 }
 
-function useImage(image, file) {
+function photoFileName(file) {
+  const ext = ((file && file.name || '').split('.').pop() || 'png').toLowerCase();
+  return 'photo.' + ({ jpeg: 'jpg', jpg: 'jpg', png: 'png', webp: 'webp' }[ext] || 'png');
+}
+
+function useImage(image, file, bytes) {
   remember();
+  projectHandle = null;
+  sessionNote = '';
   SLOTS.forEach(([name]) => {
     if (name === 'albedo') return;
     delete slotImages[name];
     setSlotMode(name, 'generate');
-    document.querySelector('[data-file-name="' + name + '"]').textContent = text('maps.choose');
+    document.querySelector('[data-file-name="' + name + '"]').textContent = text('ui.materialWizard.maps.choose');
   });
   original = image;
+  photoBytes = bytes || null;
+  photoName = bytes ? photoFileName(file) : null;
   slotImages.albedo = image;
   setSlotMode('albedo', 'load');
-  document.querySelector('[data-file-name="albedo"]').textContent = file && file.name ? file.name : text('maps.choose');
+  document.querySelector('[data-file-name="albedo"]').textContent = file && file.name ? file.name : text('ui.materialWizard.maps.choose');
   cropInput.value = '';
   setNameFrom(file);
   commit();
@@ -1976,7 +2230,10 @@ drop.addEventListener('drop', async (event) => {
   event.preventDefault();
   drop.classList.remove('is-over');
   const file = event.dataTransfer.files && event.dataTransfer.files[0];
-  if (file && file.type.startsWith('image/')) useImage(await loadImage(file), file);
+  if (file && file.type.startsWith('image/')) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    useImage(await loadImage(new Blob([bytes], { type: file.type })), file, bytes);
+  }
 });
 window.addEventListener('paste', async (event) => {
   const items = event.clipboardData && event.clipboardData.items;
@@ -1984,7 +2241,8 @@ window.addEventListener('paste', async (event) => {
   for (const item of items) {
     if (item.type.startsWith('image/')) {
       const file = item.getAsFile();
-      useImage(await loadImage(file), file);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      useImage(await loadImage(new Blob([bytes], { type: file.type || 'image/png' })), file, bytes);
       break;
     }
   }
@@ -2011,7 +2269,160 @@ document.querySelectorAll('[data-preset]').forEach((button) => {
   });
 });
 
-document.getElementById('pick-white').addEventListener('click', () => { pickWhite = true; });
+const loupe = document.getElementById('loupe');
+const loupeCanvas = loupe.querySelector('canvas');
+const loupeLabel = loupe.querySelector('span');
+const loupeSource = document.createElement('canvas');
+loupeSource.width = loupeSource.height = 15;
+
+function srgbByte(value) {
+  const c = value / 255;
+  const s = c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  return Math.max(0, Math.min(255, Math.round(s * 255)));
+}
+
+function sampleMap(map, px, py) {
+  let r = 0, g = 0, b = 0, n = 0;
+  const x = Math.max(0, Math.min(map.w - 1, px));
+  const y = Math.max(0, Math.min(map.h - 1, py));
+  for (let sy = Math.max(0, y - 3); sy <= Math.min(map.h - 1, y + 3); sy++) {
+    for (let sx = Math.max(0, x - 3); sx <= Math.min(map.w - 1, x + 3); sx++) {
+      const i = (sy * map.w + sx) * 4;
+      r += map.rgba[i]; g += map.rgba[i + 1]; b += map.rgba[i + 2]; n++;
+    }
+  }
+  r /= n; g /= n; b /= n;
+  const hex = [r, g, b].map((v) => srgbByte(v).toString(16).padStart(2, '0')).join('');
+  return { r: r / 255, g: g / 255, b: b / 255, hex };
+}
+
+function mapPixel(event, map) {
+  const uv = viewUv(event);
+  const [repeatX, repeatY] = picker.repeat;
+  const u = ((uv.x - 0.5) / viewZoom.zoom + viewZoom.x) * repeatX;
+  const v = ((uv.y - 0.5) / viewZoom.zoom + viewZoom.y) * repeatY;
+  return {
+    x: Math.floor((u - Math.floor(u)) * map.w),
+    y: Math.floor((1 - (v - Math.floor(v))) * map.h),
+  };
+}
+
+function cancelPick(restoreView = true) {
+  if (!picker) return;
+  const previous = picker.previousView;
+  drop.classList.remove('mw-picking');
+  picker.button.classList.remove('mw-armed');
+  fillCopy(picker.button.parentElement || picker.button);
+  picker = null;
+  loupe.hidden = true;
+  canvas.style.cursor = viewZoom.zoom > 1 ? 'grab' : '';
+  if (restoreView && viewSelect.value === 'source') showView(previous);
+}
+
+function startPick(button, zone, light) {
+  if (picker && picker.button === button) { cancelPick(); return; }
+  const previousView = picker ? picker.previousView : viewSelect.value;
+  cancelPick(false);
+  const map = engine.readMap('source');
+  if (!map) return;
+  showView('source');
+  picker = { button, zone, light, map, previousView, repeat: readParams().layoutPair, moved: false, down: null };
+  drop.classList.add('mw-picking');
+  button.classList.add('mw-armed');
+  const label = button.querySelector('[data-copy]') || button;
+  label.textContent = text('ui.materialWizard.pick.hint');
+  canvas.style.cursor = 'crosshair';
+}
+
+function drawLoupe(event) {
+  if (!picker || (event.pointerType === 'touch' && !event.buttons)) { loupe.hidden = true; return; }
+  const map = picker.map;
+  const pixel = mapPixel(event, map);
+  const ctx = loupeSource.getContext('2d');
+  const img = ctx.createImageData(15, 15);
+  for (let y = 0; y < 15; y++) {
+    for (let x = 0; x < 15; x++) {
+      const sx = Math.max(0, Math.min(map.w - 1, pixel.x - 7 + x));
+      const sy = Math.max(0, Math.min(map.h - 1, pixel.y - 7 + y));
+      const i = (sy * map.w + sx) * 4;
+      const o = (y * 15 + x) * 4;
+      img.data[o] = srgbByte(map.rgba[i]);
+      img.data[o + 1] = srgbByte(map.rgba[i + 1]);
+      img.data[o + 2] = srgbByte(map.rgba[i + 2]);
+      img.data[o + 3] = 255;
+      if (x >= 4 && x <= 10 && y >= 4 && y <= 10 && (x === 4 || x === 10 || y === 4 || y === 10)) {
+        img.data[o] = 241; img.data[o + 1] = 90; img.data[o + 2] = 34;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const view = loupeCanvas.getContext('2d');
+  view.imageSmoothingEnabled = false;
+  view.drawImage(loupeSource, 0, 0, 96, 96);
+  loupeLabel.textContent = '#' + sampleMap(map, pixel.x, pixel.y).hex;
+  const flipX = event.clientX > window.innerWidth - 140;
+  const flipY = event.clientY > window.innerHeight - 150;
+  loupe.style.left = (event.clientX + (flipX ? -112 : 16)) + 'px';
+  loupe.style.top = (event.clientY + (flipY ? -120 : 16)) + 'px';
+  loupe.hidden = false;
+}
+
+function applyPick(event) {
+  const pixel = mapPixel(event, picker.map);
+  const sample = sampleMap(picker.map, pixel.x, pixel.y);
+  remember();
+  if (picker.light) {
+    lightColors = lightColors.concat('#' + sample.hex).slice(-LIGHT_COLORS_MAX);
+    renderLightColors();
+  } else if (picker.zone) {
+    zoneEl(picker.zone, 'color').value = '#' + sample.hex;
+    fillCopy(zoneHost);
+  } else {
+    const yv = 0.2126 * sample.r + 0.7152 * sample.g + 0.0722 * sample.b;
+    whiteBalance = [yv / Math.max(0.02, sample.r), yv / Math.max(0.02, sample.g), yv / Math.max(0.02, sample.b)];
+  }
+  cancelPick();
+  commit();
+  schedule();
+}
+
+function autoWhite() {
+  const map = engine.readMap('source');
+  if (!map) return;
+  let r = 0, g = 0, b = 0, n = 0;
+  const step = Math.max(1, Math.floor(Math.max(map.w, map.h) / 48));
+  for (let y = 0; y < map.h; y += step) {
+    for (let x = 0; x < map.w; x += step) {
+      const i = (y * map.w + x) * 4;
+      const R = map.rgba[i] / 255, G = map.rgba[i + 1] / 255, B = map.rgba[i + 2] / 255;
+      const yv = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+      const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+      if (yv < 0.05 || yv > 0.75 || (mx > 0.0001 && (mx - mn) / mx > 0.2)) continue;
+      r += R; g += G; b += B; n++;
+    }
+  }
+  if (!n) return;
+  r /= n; g /= n; b /= n;
+  const yv = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  remember();
+  whiteBalance = [yv / Math.max(0.02, r), yv / Math.max(0.02, g), yv / Math.max(0.02, b)];
+  commit();
+  schedule();
+}
+
+document.getElementById('pick-white').addEventListener('click', () => startPick(document.getElementById('pick-white'), 0));
+document.getElementById('pick-light').addEventListener('click', () => startPick(document.getElementById('pick-light'), 0, true));
+document.getElementById('clear-light').addEventListener('click', () => { remember(); lightColors = []; renderLightColors(); commit(); schedule(); });
+lightHost.addEventListener('click', (event) => {
+  const swatch = event.target.closest('[data-light-remove]');
+  if (!swatch) return;
+  remember();
+  lightColors.splice(Number(swatch.dataset.lightRemove), 1);
+  renderLightColors();
+  commit();
+  schedule();
+});
+document.getElementById('auto-white').addEventListener('click', autoWhite);
 document.getElementById('clear-white').addEventListener('click', () => { remember(); whiteBalance = null; commit(); schedule(); });
 let panFrom = null;
 const touches = new Map();
@@ -2029,6 +2440,12 @@ canvas.addEventListener('pointerdown', (event) => {
     if (touches.size > 2) return;
   }
   panFrom = { x: event.clientX, y: event.clientY };
+  if (picker) {
+    picker.moved = false;
+    picker.down = { x: event.clientX, y: event.clientY };
+    canvas.style.cursor = 'crosshair';
+    return;
+  }
   if (viewZoom.zoom > 1 || viewSelect.value === 'preview') canvas.style.cursor = 'grabbing';
 });
 function imagePoint(event) {
@@ -2055,7 +2472,7 @@ canvas.addEventListener('pointermove', (event) => {
   if (pinch && touches.size >= 2) {
     if (!original) return;
     const now = pinchState();
-    if (viewZoom.zoom > 1) {
+    if (viewZoom.zoom > 1 || viewSelect.value === 'preview') {
       const fit = fittedSize();
       viewZoom.x -= (now.x - pinch.x) / fit.w / viewZoom.zoom;
       viewZoom.y += (now.y - pinch.y) / fit.h / viewZoom.zoom;
@@ -2065,18 +2482,32 @@ canvas.addEventListener('pointermove', (event) => {
     pinch = now;
     return;
   }
-  if (!event.buttons || pickWhite || !panFrom) return;
+  if (picker) {
+    drawLoupe(event);
+    if (!event.buttons || !panFrom || !picker.down) return;
+    if (Math.hypot(event.clientX - picker.down.x, event.clientY - picker.down.y) > 4) picker.moved = true;
+    if (!picker.moved || viewZoom.zoom <= 1) return;
+    const fit = fittedSize();
+    viewZoom.x -= (event.clientX - panFrom.x) / fit.w / viewZoom.zoom;
+    viewZoom.y += (event.clientY - panFrom.y) / fit.h / viewZoom.zoom;
+    panFrom = { x: event.clientX, y: event.clientY };
+    clampZoom();
+    presentCurrent();
+    return;
+  }
+  if (!event.buttons || !panFrom) return;
   const preview = viewSelect.value === 'preview';
   const lightDrag = event.buttons === 2 || event.shiftKey;
   const dx = event.clientX - panFrom.x;
   const dy = event.clientY - panFrom.y;
-  if (preview && event.buttons === 1 && !event.shiftKey) {
+  if (preview && event.buttons === 1 && !event.shiftKey && !event.ctrlKey) {
     turnPreview(dx * 0.01, dy * 0.01);
     panFrom = { x: event.clientX, y: event.clientY };
     presentCurrent();
     return;
   }
-  if (viewZoom.zoom > 1 && (preview ? event.buttons === 4 : event.buttons === 1)) {
+  const movePreview = preview && (event.buttons === 4 || (event.buttons === 1 && event.ctrlKey));
+  if (movePreview || (!preview && viewZoom.zoom > 1 && event.buttons === 1)) {
     const fit = fittedSize();
     viewZoom.x -= dx / fit.w / viewZoom.zoom;
     viewZoom.y += dy / fit.h / viewZoom.zoom;
@@ -2098,7 +2529,11 @@ function endPan(event) {
     return;
   }
   panFrom = null;
-  canvas.style.cursor = viewZoom.zoom > 1 ? 'grab' : '';
+  if (picker && event.type === 'pointerup' && picker.down && !picker.moved) {
+    applyPick(event);
+    return;
+  }
+  canvas.style.cursor = picker ? 'crosshair' : (viewZoom.zoom > 1 ? 'grab' : '');
 }
 canvas.addEventListener('pointerup', endPan);
 canvas.addEventListener('pointercancel', endPan);
@@ -2106,6 +2541,8 @@ canvas.addEventListener('dblclick', () => {
   if (!original) return;
   if (viewSelect.value === 'preview') {
     previewRot = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    viewZoom.x = 0.5;
+    viewZoom.y = 0.5;
   }
   if (viewZoom.zoom > 1) setZoom(1);
   else presentCurrent();
@@ -2118,26 +2555,6 @@ drop.addEventListener('wheel', (event) => {
   setZoom(viewZoom.zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1), viewUv(event));
 }, { passive: false });
 zoomInput.addEventListener('input', () => setZoom(Number(zoomInput.value)));
-canvas.addEventListener('click', (event) => {
-  if (!pickWhite) return;
-  pickWhite = false;
-  const uv = viewUv(event);
-  const point = {
-    x: (uv.x - 0.5) / viewZoom.zoom + viewZoom.x,
-    y: 1 - ((uv.y - 0.5) / viewZoom.zoom + viewZoom.y),
-  };
-  const map = engine.readMap('source');
-  if (!map) return;
-  const x = Math.max(0, Math.min(map.w - 1, Math.floor(point.x * map.w)));
-  const y = Math.max(0, Math.min(map.h - 1, Math.floor(point.y * map.h)));
-  const i = (y * map.w + x) * 4;
-  const r = map.rgba[i] / 255, g = map.rgba[i + 1] / 255, b = map.rgba[i + 2] / 255;
-  const yv = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  remember();
-  whiteBalance = [yv / Math.max(0.02, r), yv / Math.max(0.02, g), yv / Math.max(0.02, b)];
-  commit();
-  schedule();
-});
 
 document.getElementById('mask-file').addEventListener('change', async (event) => {
   remember();
@@ -2163,6 +2580,8 @@ document.getElementById('apply-rotate').addEventListener('click', () => {
   if (!original || !fixAngle()) return;
   remember();
   original = rotateFill(original, fixAngle());
+  photoBytes = null;
+  photoName = null;
   setAngle(0);
   commit();
   schedule();
@@ -2178,11 +2597,11 @@ document.getElementById('quad-reset').addEventListener('click', () => {
 
 function showRepeat() {
   const note = document.getElementById('repeat-note');
-  if (!repeatInfo) { note.textContent = text('notes.repeatNone'); return; }
-  note.textContent = text('notes.repeat', { x: repeatInfo.periodX, y: repeatInfo.periodY, w: repeatInfo.cropW, h: repeatInfo.cropH });
+  if (!repeatInfo) { note.textContent = text('ui.materialWizard.notes.repeatNone'); return; }
+  note.textContent = text('ui.materialWizard.notes.repeat', { x: repeatInfo.periodX, y: repeatInfo.periodY, w: repeatInfo.cropW, h: repeatInfo.cropH });
   const button = document.createElement('button');
   button.type = 'button';
-  button.textContent = text('tile.useCrop');
+  button.textContent = text('ui.materialWizard.tile.useCrop');
   button.addEventListener('click', () => {
     remember();
     const w = repeatInfo.cropW / repeatSize.w;
@@ -2190,7 +2609,6 @@ function showRepeat() {
     document.querySelector('[data-param="cropShape"]').value = 'free';
     document.querySelector('[data-param="tileOn"]').checked = true;
     cropInput.value = frameString({ x: (1 - w) / 2, y: (1 - h) / 2, w, h });
-    fixTools.open = false;
     commit();
     schedule();
     refreshEditor();
@@ -2214,6 +2632,8 @@ document.getElementById('rectify').addEventListener('click', () => {
   const data = imageDataOf(original);
   const warped = warpBuffer(data.data, data.width, data.height, homographyFromQuad(quad));
   original = canvasFromRGBA(warped, data.width, data.height);
+  photoBytes = null;
+  photoName = null;
   quadInput.value = IDENTITY_QUAD.join(',');
   commit();
   schedule();
@@ -2238,24 +2658,24 @@ function drawLights() {
   lights.forEach((light, index) => {
     const row = document.createElement('div');
     row.className = 'mw-light';
-    row.innerHTML = '<span>' + text('maps.light', { n: index + 1 }) + '</span>';
+    row.innerHTML = '<span>' + text('ui.materialWizard.maps.light', { n: index + 1 }) + '</span>';
     const az = document.createElement('input');
     az.type = 'number';
     az.value = light.az;
-    az.title = text('maps.azimuth');
+    az.title = text('ui.materialWizard.maps.azimuth');
     az.addEventListener('focus', () => remember());
     az.addEventListener('input', () => { light.az = num(az.value, 0); });
     az.addEventListener('change', () => { light.az = num(az.value, 0); commit(); });
     const el = document.createElement('input');
     el.type = 'number';
     el.value = light.el;
-    el.title = text('maps.elevation');
+    el.title = text('ui.materialWizard.maps.elevation');
     el.addEventListener('focus', () => remember());
     el.addEventListener('input', () => { light.el = num(el.value, 45); });
     el.addEventListener('change', () => { light.el = num(el.value, 45); commit(); });
     const remove = document.createElement('button');
     remove.type = 'button';
-    remove.textContent = text('maps.remove');
+    remove.textContent = text('ui.materialWizard.maps.remove');
     remove.addEventListener('click', () => { remember(); lights.splice(index, 1); commit(); drawLights(); });
     row.appendChild(az);
     row.appendChild(el);
@@ -2266,7 +2686,7 @@ function drawLights() {
 
 document.getElementById('solve-lights').addEventListener('click', () => {
   if (lights.length < 3) {
-    warningsEl.textContent = text('notes.lights');
+    warningsEl.textContent = text('ui.materialWizard.notes.lights');
     return;
   }
   remember();
@@ -2275,6 +2695,8 @@ document.getElementById('solve-lights').addEventListener('click', () => {
   const images = lights.map((light) => imageDataOf(light.image, w, h).data);
   const solved = solveLights(images, lights.map((light) => ({ az: light.az, el: light.el })), w, h);
   original = canvasFromRGBA(solved.albedo, w, h);
+  photoBytes = null;
+  photoName = null;
   slotImages.normal = canvasFromRGBA(solved.normal, w, h);
   document.querySelector('[data-slot-mode="normal"]').value = 'load';
   document.querySelector('[data-slot-mode="albedo"]').value = 'load';
@@ -2302,6 +2724,10 @@ document.getElementById('orm-file').addEventListener('change', async (event) => 
   schedule();
 });
 
+function mapPng(fileName, image) {
+  return (fileName.endsWith('.dataR.png') ? grayPngBytes : pngBytes)(image.rgba, image.w, image.h);
+}
+
 async function filesForCurrent(subfolder) {
   const params = readParams();
   const prefix = subfolder ? subfolder + '/' : '';
@@ -2312,7 +2738,7 @@ async function filesForCurrent(subfolder) {
     ['metal', params.name + '_m.dataR.png'],
     ['ao', params.name + '_ao.dataR.png'],
   ];
-  const shapedOpacity = params.opacityEdge > 0 || params.opacityPatch > 0 || params.opacityCrack > 0 || params.opacityRegion >= 0;
+  const shapedOpacity = params.opacityEdge > 0 || params.opacityPatch > 0 || params.opacityCrack > 0 || params.zones.some((zone) => zone.opacity < 1);
   if (params.profile === 'road' || params.opacityMode === 'load' || shapedOpacity) {
     names.push(['opacity', params.name + '_o.dataR.png']);
   }
@@ -2322,7 +2748,7 @@ async function filesForCurrent(subfolder) {
   }));
   const files = [];
   for (let i = 0; i < names.length; i++) {
-    files.push({ name: prefix + names[i][1], data: await pngBytes(images[i].rgba, images[i].w, images[i].h) });
+    files.push({ name: prefix + names[i][1], data: await mapPng(names[i][1], images[i]) });
   }
   const json = JSON.stringify(materialDocument({
     name: params.name,
@@ -2342,7 +2768,7 @@ async function filesForCurrent(subfolder) {
     const length = textureLengthFor(params.roadWidth, size.w, size.h);
     files.push({
       name: prefix + 'textureLength.txt',
-      data: new TextEncoder().encode(text('notes.lengthFile', { length: length.toFixed(3) })),
+      data: new TextEncoder().encode(text('ui.materialWizard.notes.lengthFile', { length: length.toFixed(3) })),
     });
   }
   return files;
@@ -2362,7 +2788,7 @@ Object.keys(SAVE).forEach((slot) => {
   const button = document.createElement('button');
   button.type = 'button';
   button.dataset.save = slot;
-  button.innerHTML = '<i class="fa-solid fa-download"></i> <span data-copy="slots.' + slot + '">' + text('slots.' + slot) + '</span>';
+  button.innerHTML = '<i class="fa-solid fa-download"></i> <span data-copy="ui.materialWizard.slots.' + slot + '">' + text('ui.materialWizard.slots.' + slot) + '</span>';
   saveHost.appendChild(button);
 });
 document.body.addEventListener('click', async (event) => {
@@ -2371,13 +2797,13 @@ document.body.addEventListener('click', async (event) => {
   const [key, suffix] = SAVE[button.dataset.save];
   const image = await atOutputSize(() => engine.readMap(key)).catch(() => null);
   if (!image) return;
-  downloadBytes(await pngBytes(image.rgba, image.w, image.h), readParams().name + suffix, 'image/png');
+  downloadBytes(await mapPng(suffix, image), readParams().name + suffix, 'image/png');
 });
 
 document.getElementById('download').addEventListener('click', async () => {
   if (!original) return;
   const files = await filesForCurrent('');
-  downloadBytes(zipStore(files), readParams().name + '.zip', 'application/zip');
+  downloadBytes(await zipStore(files), readParams().name + '.zip', 'application/zip');
 });
 
 function classify(filename) {
@@ -2423,7 +2849,7 @@ document.getElementById('batch-folder').addEventListener('change', (event) => {
   list.innerHTML = '';
   groupFiles(event.target.files).forEach((group) => {
     const li = document.createElement('li');
-    li.textContent = text('notes.batchLine', { name: group.base, files: Object.keys(group.files).join(', ') });
+    li.textContent = text('ui.materialWizard.notes.batchLine', { name: group.base, files: Object.keys(group.files).join(', ') });
     list.appendChild(li);
   });
 });
@@ -2435,16 +2861,18 @@ async function runGroups(files, writer) {
   const all = [];
   for (const group of groups) {
     const li = document.createElement('li');
-    li.textContent = text('notes.batchWork', { name: group.base });
+    li.textContent = text('ui.materialWizard.notes.batchWork', { name: group.base });
     list.appendChild(li);
     try {
       const colorFile = group.files.albedo;
       if (!colorFile) throw new Error('no color image');
       original = await loadImage(colorFile);
+      photoBytes = null;
+      photoName = null;
       document.querySelector('[data-param="name"]').value = group.base.replace(/[^a-z0-9_]+/gi, '_').replace(/^_+/, '') || 'm_material';
       for (const [name] of SLOTS) {
         slotImages[name] = null;
-        document.querySelector('[data-slot-mode="' + name + '"]').value = 'generate';
+        document.querySelector('[data-slot-mode="' + name + '"]').value = name === 'albedo' ? 'load' : 'generate';
       }
       slotImages.albedo = original;
       if (group.files.normal) {
@@ -2461,9 +2889,9 @@ async function runGroups(files, writer) {
       const produced = await filesForCurrent(group.base);
       if (writer) await writer(group.base, produced);
       else all.push(...produced);
-      li.textContent = text('notes.batchDone', { name: group.base });
+      li.textContent = text('ui.materialWizard.notes.batchDone', { name: group.base });
     } catch (error) {
-      li.textContent = text('notes.batchFail', { name: group.base });
+      li.textContent = text('ui.materialWizard.notes.batchFail', { name: group.base });
     }
   }
   return all;
@@ -2473,7 +2901,7 @@ document.getElementById('run-batch').addEventListener('click', async () => {
   const input = document.getElementById('batch-folder');
   if (!input.files.length) return;
   const all = await runGroups(input.files, null);
-  if (all.length) downloadBytes(zipStore(all), 'material-wizard-batch.zip', 'application/zip');
+  if (all.length) downloadBytes(await zipStore(all), 'material-wizard-batch.zip', 'application/zip');
 });
 
 document.getElementById('write-folder').addEventListener('click', async () => {
@@ -2494,5 +2922,264 @@ document.getElementById('write-folder').addEventListener('click', async () => {
     }
   });
 });
+
+function imagePngBytes(image) {
+  const c = paint(image, image.width, image.height);
+  return new Promise((resolve) => c.toBlob(async (blob) => {
+    c.width = c.height = 0;
+    resolve(new Uint8Array(await blob.arrayBuffer()));
+  }, 'image/png'));
+}
+
+const GRAY_MAPS = new Set(['height', 'roughness', 'metallic', 'ao', 'opacity']);
+
+async function imageGrayBytes(image) {
+  const c = paint(image, image.width, image.height);
+  const data = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+  c.width = c.height = 0;
+  return grayPngBytes(data.data, data.width, data.height);
+}
+
+async function projectBytes() {
+  const values = readPreset();
+  document.querySelectorAll('[data-param]').forEach((el) => {
+    if (PRESET_SKIP.has(el.dataset.param)) values['p:' + el.dataset.param] = controlValue(el);
+  });
+  const names = {};
+  document.querySelectorAll('[data-file-name]').forEach((el) => { names[el.dataset.fileName] = el.textContent; });
+  const mask = document.getElementById('mask-file')._image || null;
+  const maps = SLOTS.map(([name]) => name).filter((name) => name !== 'albedo' && slotImages[name]);
+  const photo = photoBytes && photoName ? photoName : 'photo.png';
+  const session = {
+    materialWizardSession: 1,
+    version: VERSION,
+    photo,
+    values,
+    names,
+    maps,
+    whiteBalance,
+    lightColors,
+    sun: [sunAngle.az, sunAngle.el],
+    lights: lights.map((light) => ({ az: light.az, el: light.el })),
+    mask: !!mask,
+  };
+  const files = [{ name: 'session.json', data: new TextEncoder().encode(JSON.stringify(session)) }];
+  files.push({ name: photo, data: photoBytes || await imagePngBytes(original) });
+  for (const name of maps) {
+    const image = slotImages[name];
+    files.push({ name: 'maps/' + name + '.png', data: GRAY_MAPS.has(name) ? await imageGrayBytes(image) : await imagePngBytes(image) });
+  }
+  for (let i = 0; i < lights.length; i++) files.push({ name: 'lights/' + i + '.png', data: await imagePngBytes(lights[i].image) });
+  if (mask) files.push({ name: 'mask.png', data: await imageGrayBytes(mask) });
+  return zipStore(files);
+}
+
+async function decodeProject(project) {
+  const names = [project.photo];
+  for (const name of project.session.maps || []) names.push('maps/' + name + '.png');
+  for (let i = 0; i < (project.session.lights || []).length; i++) names.push('lights/' + i + '.png');
+  if (project.session.mask) names.push('mask.png');
+  const images = [];
+  try {
+    for (const name of names) {
+      const bitmap = await createImageBitmap(new Blob([project.files[name]]));
+      if (!bitmap.width || !bitmap.height) throw new Error('empty image');
+      images.push(bitmap);
+    }
+  } catch (error) {
+    images.forEach((image) => image.close());
+    throw error;
+  }
+  return images;
+}
+
+async function verifiedProject() {
+  const bytes = await projectBytes();
+  const images = await decodeProject(await readProject(bytes));
+  images.forEach((image) => image.close());
+  return bytes;
+}
+
+let projectHandle = null;
+const PROJECT_TYPE = { 'application/x-material-wizard': ['.mwz'] };
+const IMAGE_TYPES = { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'], 'image/webp': ['.webp'], 'image/avif': ['.avif'], 'image/bmp': ['.bmp'], 'image/gif': ['.gif'] };
+
+async function saveProject(as) {
+  if (!original) return;
+  const name = readParams().name + '.mwz';
+  let handle = projectHandle;
+  try {
+    if (window.showSaveFilePicker && (as || !handle)) {
+      handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: text('ui.materialWizard.menu.projectType'), accept: PROJECT_TYPE }] });
+    }
+    const bytes = await verifiedProject();
+    if (!window.showSaveFilePicker) {
+      downloadBytes(bytes, name, 'application/zip');
+      return;
+    }
+    const writable = await handle.createWritable();
+    await writable.write(bytes);
+    await writable.close();
+    projectHandle = handle;
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    console.warn('project save failed', error);
+    warningsEl.textContent = text('ui.materialWizard.notes.saveFailed');
+  }
+}
+
+async function openAny(file, handle) {
+  if (/\.mwz$/i.test(file.name)) {
+    if (await openProject(file)) projectHandle = handle || null;
+  } else {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    useImage(await loadImage(new Blob([bytes], { type: file.type || 'image/png' })), file, bytes);
+  }
+}
+
+const openAnyInput = document.getElementById('open-any');
+openAnyInput.addEventListener('change', () => {
+  const file = openAnyInput.files[0];
+  openAnyInput.value = '';
+  if (file) openAny(file);
+});
+
+async function pickAndOpen() {
+  if (!window.showOpenFilePicker) { openAnyInput.click(); return; }
+  try {
+    const [handle] = await window.showOpenFilePicker({ types: [{ description: text('ui.materialWizard.menu.openType'), accept: { ...PROJECT_TYPE, ...IMAGE_TYPES } }] });
+    await openAny(await handle.getFile(), handle);
+  } catch (error) {
+    if (error.name !== 'AbortError') console.warn('open failed', error);
+  }
+}
+
+if ('launchQueue' in window) {
+  window.launchQueue.setConsumer(async (params) => {
+    const [handle] = params.files || [];
+    if (handle) await openAny(await handle.getFile(), handle);
+  });
+}
+
+async function openProject(file) {
+  try {
+    const project = await readProject(new Uint8Array(await file.arrayBuffer()));
+    const images = await decodeProject(project);
+    const session = project.session;
+    const photo = images[0];
+    let cursor = 1;
+    const maps = {};
+    for (const name of session.maps || []) maps[name] = images[cursor++];
+    const lightImages = [];
+    for (let i = 0; i < (session.lights || []).length; i++) lightImages.push(images[cursor++]);
+    const mask = session.mask ? images[cursor] : null;
+    restoring = true;
+    original = photo;
+    photoBytes = project.files[project.photo];
+    photoName = project.photo;
+    sessionNote = versionNewer(session.version) ? text('ui.materialWizard.notes.newerFile', { v: session.version }) : '';
+    Object.keys(slotImages).forEach((key) => delete slotImages[key]);
+    Object.assign(slotImages, maps, { albedo: photo });
+    whiteBalance = session.whiteBalance || null;
+    lightColors = (session.lightColors || []).filter((hex) => /^#[0-9a-f]{6}$/i.test(hex)).slice(0, LIGHT_COLORS_MAX);
+    renderLightColors();
+    lights = (session.lights || []).map((light, i) => ({ image: lightImages[i], az: light.az, el: light.el }));
+    document.getElementById('mask-file')._image = mask;
+    writePreset(session.values || {});
+    document.querySelectorAll('[data-file-name]').forEach((el) => {
+      el.textContent = (session.names || {})[el.dataset.fileName] || text('ui.materialWizard.maps.choose');
+    });
+    SLOTS.forEach(([name]) => syncSlot(name));
+    drawLights();
+    restoring = false;
+    held = null;
+    undoStack.length = 0;
+    redoStack.length = 0;
+    syncHistoryButtons();
+    if (session.sun) {
+      sunAngle.az = session.sun[0];
+      sunAngle.el = session.sun[1];
+      drawSunDial();
+    }
+    schedule();
+    refreshEditor();
+    return true;
+  } catch (error) {
+    restoring = false;
+    console.warn('session open failed', error);
+    warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
+    return false;
+  }
+}
+
+const menuButtons = Array.from(document.querySelectorAll('[data-menu]'));
+const flyoutOf = (button) => document.querySelector('[data-flyout="' + button.dataset.menu + '"]');
+function closeMenus() {
+  menuButtons.forEach((button) => {
+    flyoutOf(button).hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+  });
+}
+menuButtons.forEach((button) => button.addEventListener('click', () => {
+  const flyout = flyoutOf(button);
+  const open = flyout.hidden;
+  closeMenus();
+  if (!open) return;
+  flyout.hidden = false;
+  const rect = button.getBoundingClientRect();
+  flyout.style.top = rect.bottom + 'px';
+  flyout.style.left = Math.max(0, Math.min(rect.left, window.innerWidth - flyout.offsetWidth)) + 'px';
+  button.setAttribute('aria-expanded', 'true');
+}));
+document.addEventListener('pointerdown', (event) => {
+  if (!event.target.closest('.mw-flyout, [data-menu]')) closeMenus();
+});
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  closeMenus();
+  cancelPick();
+});
+document.getElementById('app-version').textContent = 'Material Wizard ' + VERSION;
+
+let installPrompt = null;
+const installItems = document.querySelectorAll('[data-install]');
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  installItems.forEach((el) => { el.hidden = false; });
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  installItems.forEach((el) => { el.hidden = true; });
+});
+
+const FILE_ACTIONS = {
+  open: pickAndOpen,
+  save: () => saveProject(false),
+  saveAs: () => saveProject(true),
+  export: () => document.getElementById('download').click(),
+  install: async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+  },
+};
+document.querySelector('[data-flyout="file"]').addEventListener('click', (event) => {
+  const item = event.target.closest('[data-file-action]');
+  if (!item) return;
+  closeMenus();
+  FILE_ACTIONS[item.dataset.fileAction]();
+});
+window.addEventListener('keydown', (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+  const key = event.key.toLowerCase();
+  const action = key === 'o' ? 'open' : key === 's' ? (event.shiftKey ? 'saveAs' : 'save') : key === 'e' ? 'export' : null;
+  if (!action) return;
+  event.preventDefault();
+  closeMenus();
+  FILE_ACTIONS[action]();
+});
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((error) => console.warn('service worker failed', error));
 
 engine.resize(1024, 1024);

@@ -159,6 +159,33 @@ const HAMMERSLEY = `vec2 hammersley(uint i, uint n) {
   return vec2(float(i) / float(n), float(b) * 2.3283064365386963e-10);
 }`;
 
+const FIELD = `float field(vec2 uv) {
+  float u = uv.x - 0.5;
+  float v = uv.y - 0.5;
+  float tau = 6.2831853;
+  float x1 = uPeriodic.x > 0.5 ? cos(tau * uv.x) : u;
+  float x2 = uPeriodic.x > 0.5 ? sin(tau * uv.x) : u * u - 1.0 / 12.0;
+  float y1 = uPeriodic.y > 0.5 ? cos(tau * uv.y) : v;
+  float y2 = uPeriodic.y > 0.5 ? sin(tau * uv.y) : v * v - 1.0 / 12.0;
+  float xy = uPeriodic.x > 0.5 || uPeriodic.y > 0.5 ? 0.0 : u * v;
+  return dot(uFitA, vec3(x1, x2, y1)) + dot(uFitB, vec2(y2, xy));
+}`;
+
+// Same basis as FIELD. The quadratic terms are centred, so every term but the constant averages to 0.
+function fieldBasis(uu, vv, periodic) {
+  const tau = Math.PI * 2;
+  const u = uu - 0.5;
+  const v = vv - 0.5;
+  return [
+    1,
+    periodic[0] ? Math.cos(tau * uu) : u,
+    periodic[0] ? Math.sin(tau * uu) : u * u - 1 / 12,
+    periodic[1] ? Math.cos(tau * vv) : v,
+    periodic[1] ? Math.sin(tau * vv) : v * v - 1 / 12,
+    periodic[0] || periodic[1] ? 0 : u * v,
+  ];
+}
+
 const FS = {
   linear: `#version 300 es
 precision highp float;
@@ -206,14 +233,57 @@ void main() {
   o = vec4(c, 1.0);
 }`,
 
+  blurA: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uTex;
+uniform vec2 uStep;
+void main() {
+  vec4 c = texture(uTex, vUv) * 0.227027;
+  c += texture(uTex, vUv + uStep) * 0.1945946;
+  c += texture(uTex, vUv - uStep) * 0.1945946;
+  c += texture(uTex, vUv + uStep * 2.0) * 0.1216216;
+  c += texture(uTex, vUv - uStep * 2.0) * 0.1216216;
+  o = c;
+}`,
+
+  lightmask: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uSrc;
+uniform sampler2D uBlur;
+uniform vec3 uPick0;
+uniform vec3 uPick1;
+uniform vec3 uPick2;
+uniform vec3 uPick3;
+uniform float uCount;
+uniform float uRange;
+vec3 chroma(vec3 c) { return c / max(c.r + c.g + c.b, 0.0001); }
+void main() {
+  vec3 c = chroma(texture(uBlur, vUv).rgb);
+  float d = distance(c, chroma(uPick0));
+  if (uCount > 1.5) d = min(d, distance(c, chroma(uPick1)));
+  if (uCount > 2.5) d = min(d, distance(c, chroma(uPick2)));
+  if (uCount > 3.5) d = min(d, distance(c, chroma(uPick3)));
+  float m = 1.0 - smoothstep(uRange, uRange * 2.0, d);
+  o = vec4(texture(uSrc, vUv).rgb * m, m);
+}`,
+
   delight: `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 o;
 uniform sampler2D uSrc;
 uniform sampler2D uBlur;
+uniform sampler2D uField;
+uniform sampler2D uFieldWide;
+uniform float uMasked;
+uniform vec3 uLit;
 uniform float uStrength;
 uniform float uHighlight;
+uniform float uShadow;
 uniform vec3 uWhite;
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 void main() {
@@ -222,18 +292,30 @@ void main() {
   float sumS = max(src.r + src.g + src.b, 0.0001);
   float sumB = max(blur.r + blur.g + blur.b, 0.0001);
   float cd = distance(src / sumS, blur / sumB);
-  float w = uStrength * (1.0 - smoothstep(0.04, 0.22, cd));
+  float w = uStrength * mix(1.0 - smoothstep(0.04, 0.22, cd), 1.0, uMasked);
   float y = max(luma(src), 0.0001);
   float yb = max(luma(blur), 0.0001);
-  vec3 alb = src * pow(0.5 / yb, w);
+  vec4 f = texture(uField, vUv);
+  vec4 fw = texture(uFieldWide, vUv);
+  vec3 fieldFine = (f.rgb + 0.02 * blur) / (f.a + 0.02);
+  vec3 fieldWide = (fw.rgb + 0.02 * blur) / (fw.a + 0.02);
+  float yf = uMasked > 0.5 ? max(luma(mix(fieldWide, fieldFine, smoothstep(0.1, 0.5, f.a))), 0.0001) : yb;
+  vec3 alb = src * pow(0.5 / yf, w);
   float mx = max(src.r, max(src.g, src.b));
   float mn = min(src.r, min(src.g, src.b));
   float sat = mx <= 0.0001 ? 0.0 : (mx - mn) / mx;
   float hi = smoothstep(0.04, 0.28, y - yb) * (1.0 - sat);
   alb = mix(alb, (blur / sumB) * yb, hi * uHighlight);
   alb *= uWhite;
+  float sumL = max(uLit.r + uLit.g + uLit.b, 0.0001);
+  float yLit = max(luma(uLit), 0.0001);
+  float stone = smoothstep(0.15, 0.35, distance(blur / sumB, uLit / sumL));
+  float lift = (1.0 - smoothstep(0.70, 0.92, yb / yLit)) * (1.0 - stone) * uShadow;
+  vec3 tint = (uLit / sumL) / max(blur / sumB, vec3(0.0001));
+  float gain = pow(min(yLit / yb, 4.0), 1.0 - w);
+  alb *= mix(vec3(1.0), tint * gain, lift);
   alb = clamp(alb, 0.0, 4.0);
-  o = vec4(alb, hi);
+  o = vec4(alb, mix(1.0, hi, step(0.001, uStrength + uHighlight)));
 }`,
 
   norm: `#version 300 es
@@ -247,6 +329,41 @@ void main() {
   o = vec4(clamp(c.rgb * uScale, 0.03, 0.90), c.a);
 }`,
 
+  even: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uTex;
+uniform float uEven;
+uniform vec3 uFitA;
+uniform vec2 uFitB;
+uniform vec2 uPeriodic;
+uniform vec4 uShift;
+${FIELD}
+void main() {
+  vec4 c = texture(uTex, vUv);
+  float tau = 6.2831853;
+  float gain = exp(-uEven * field(vUv));
+  gain *= exp2(uShift.x * cos(tau * (vUv.x - uShift.y)));
+  gain *= exp2(uShift.z * cos(tau * (1.0 - vUv.y - uShift.w)));
+  o = vec4(clamp(c.rgb * gain, 0.0, 1.0), c.a);
+}`,
+
+  level: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uH;
+uniform float uAmount;
+uniform vec3 uFitA;
+uniform vec2 uFitB;
+uniform vec2 uPeriodic;
+${FIELD}
+void main() {
+  float h = texture(uH, vUv).r;
+  o = vec4(vec3(clamp(h - field(vUv) * uAmount, 0.0, 1.0)), 1.0);
+}`,
+
   relief: `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -255,12 +372,18 @@ uniform sampler2D uAlb;
 uniform sampler2D uN;
 uniform vec3 uLight;
 uniform float uStrength;
+uniform float uMean;
+uniform float uFadeHi;
 void main() {
   vec4 alb = texture(uAlb, vUv);
-  vec3 n = texture(uN, vUv).rgb * 2.0 - 1.0;
-  float shade = clamp(dot(normalize(n), normalize(uLight)), 0.15, 1.0);
-  vec3 c = alb.rgb / mix(1.0, shade, uStrength);
-  o = vec4(clamp(c, 0.03, 0.90), alb.a);
+  vec3 n = normalize(texture(uN, vUv).rgb * 2.0 - 1.0);
+  float shade = clamp(dot(n, normalize(uLight)), 0.15, 1.0);
+  float factor = clamp(uMean / shade, 0.75, 1.35);
+  float fade = uFadeHi > 0.5 ? (1.0 - alb.a) : 1.0;
+  factor = mix(1.0, factor, uStrength * fade);
+  float top = max(alb.r, max(alb.g, alb.b)) * factor;
+  if (top > 0.9) factor *= 0.9 / top;
+  o = vec4(alb.rgb * factor, alb.a);
 }`,
 
   height: `#version 300 es
@@ -356,7 +479,7 @@ void main() {
 precision highp float;
 in vec2 vUv;
 out vec4 o;
-uniform sampler2D uRegion;
+uniform sampler2D uZones;
 uniform sampler2D uAO;
 uniform sampler2D uH;
 uniform sampler2D uHb;
@@ -372,7 +495,7 @@ uniform float uMin;
 uniform float uMax;
 uniform float uContrast;
 void main() {
-  float base = texture(uRegion, vUv).r;
+  float base = texture(uZones, vUv).r;
   float ao = texture(uAO, vUv).r;
   float h = texture(uH, vUv).r;
   float hb = texture(uHb, vUv).r;
@@ -391,17 +514,48 @@ void main() {
 precision highp float;
 in vec2 vUv;
 out vec4 o;
-uniform sampler2D uRegion;
+uniform sampler2D uZones;
 uniform sampler2D uH;
 uniform sampler2D uHb;
 uniform float uWear;
 uniform float uSharp;
 void main() {
-  float m = texture(uRegion, vUv).g;
+  float m = texture(uZones, vUv).g;
   float wear = max(0.0, texture(uH, vUv).r - texture(uHb, vUv).r);
   m = clamp(m + smoothstep(0.01, 0.08, wear) * uWear, 0.0, 1.0);
   m = clamp((m - 0.5) * uSharp + 0.5, 0.0, 1.0);
   o = vec4(vec3(m), 1.0);
+}`,
+
+  zones: `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uTex;
+uniform vec4 uZoneColor[6];
+uniform vec4 uZoneMat[6];
+uniform vec2 uBase;
+uniform float uCount;
+uniform float uShow;
+const vec3 W = vec3(0.2126, 0.7152, 0.0722);
+void main() {
+  vec3 c = texture(uTex, vUv).rgb;
+  float y = max(dot(c, W), 0.002);
+  vec3 chroma = c / max(c.r + c.g + c.b, 0.002);
+  vec3 mat = vec3(uBase, 1.0);
+  vec3 show = vec3(0.18);
+  for (int i = 0; i < 6; i++) {
+    if (float(i) >= uCount) break;
+    vec3 z = uZoneColor[i].rgb;
+    float zy = max(dot(z, W), 0.002);
+    vec3 zc = z / max(z.r + z.g + z.b, 0.002);
+    float d = length(chroma - zc) * 3.0 + abs(log2(y / zy)) * 0.15;
+    float r = uZoneColor[i].a;
+    float w = 1.0 - smoothstep(r * 0.5, r, d);
+    mat = mix(mat, uZoneMat[i].rgb, w);
+    show = mix(show, z, w);
+  }
+  o = uShow > 0.5 ? vec4(show, 1.0) : vec4(mat, 1.0);
 }`,
 
   nsmooth: `#version 300 es
@@ -424,13 +578,12 @@ in vec2 vUv;
 out vec4 o;
 uniform sampler2D uH;
 uniform sampler2D uHb;
-uniform sampler2D uRegion;
+uniform sampler2D uZones;
 uniform sampler2D uLoaded;
 uniform float uEdge;
 uniform float uRagged;
 uniform float uPatch;
 uniform float uCrack;
-uniform float uRegionPick;
 uniform float uUseLoaded;
 void main() {
   float h = texture(uH, vUv).r;
@@ -449,10 +602,7 @@ void main() {
     float crack = smoothstep(0.01, 0.08, max(0.0, hb - h));
     m *= mix(1.0, crack, clamp(uCrack, 0.0, 1.0));
   }
-  if (uRegionPick >= 0.0) {
-    float id = texture(uRegion, vUv).b * 255.0;
-    m *= 1.0 - smoothstep(0.4, 0.6, abs(id - uRegionPick));
-  }
+  m *= texture(uZones, vUv).b;
   if (uUseLoaded > 0.5) m *= texture(uLoaded, vUv).r;
   o = vec4(vec3(clamp(m, 0.0, 1.0)), 1.0);
 }`,
@@ -1083,6 +1233,11 @@ export const CLASSES = {
   fabric: { rough: 0.95, metal: 0 },
   dirt: { rough: 0.9, metal: 0 },
   wood: { rough: 0.55, metal: 0 },
+  grass: { rough: 0.9, metal: 0 },
+  leaves: { rough: 0.75, metal: 0 },
+  stone: { rough: 0.8, metal: 0 },
+  sand: { rough: 0.95, metal: 0 },
+  rust: { rough: 0.85, metal: 0 },
 };
 
 export function createEngine(canvas) {
@@ -1102,10 +1257,6 @@ export function createEngine(canvas) {
   let sourceTex = null;
   const loaded = {};
   let maskTex = null;
-  let labels = null;
-  let labelKey = '';
-  let labelW = 0;
-  let labelH = 0;
   const warnings = [];
   const finals = {};
   const mipped = new Set();
@@ -1177,6 +1328,7 @@ export function createEngine(canvas) {
       if (!loc) return;
       const val = uniforms[key];
       if (typeof val === 'number') gl.uniform1f(loc, val);
+      else if (val instanceof Float32Array) gl.uniform4fv(loc, val);
       else if (val.length === 2) gl.uniform2f(loc, val[0], val[1]);
       else if (val.length === 3) gl.uniform3f(loc, val[0], val[1], val[2]);
       else if (val.length === 9) gl.uniformMatrix3fv(loc, false, val);
@@ -1245,11 +1397,11 @@ export function createEngine(canvas) {
     return levels;
   }
 
-  // Same blur as the last pyramid level, in 8 bit, ping-ponging between tmpB and blur8.
+  // Same blur as the last pyramid level. Float, so deep shadows keep their color ratios.
   function blurCoarse(src) {
     let current = src;
-    const horiz = rt('blur8', width, height);
-    const vert = rt('tmpB', width, height);
+    const horiz = rt('coarseH', width, height, true);
+    const vert = rt('coarseV', width, height, true);
     for (let i = 0; i < 4; i++) {
       const step = Math.pow(2, i);
       draw('blur', horiz, { uTex: current }, { uStep: [step / width, 0] });
@@ -1259,66 +1411,95 @@ export function createEngine(canvas) {
     return vert;
   }
 
-  function cluster(albedo, height, k) {
-    const aw = 48;
-    const ah = 48;
-    const aSmall = rt('as', aw, ah);
-    const hSmall = rt('hs', aw, ah);
-    draw('copy', aSmall, { uTex: albedo }, { uFlip: 0 });
-    draw('copy', hSmall, { uTex: height }, { uFlip: 0 });
-    const aBuf = read(aSmall);
-    const hBuf = read(hSmall);
-    const points = [];
-    for (let i = 0; i < aw * ah; i++) {
-      points.push([aBuf[i * 4] / 255, aBuf[i * 4 + 1] / 255, aBuf[i * 4 + 2] / 255, hBuf[i * 4] / 255]);
-    }
-    const centers = [];
-    for (let i = 0; i < k; i++) centers.push(points[Math.floor((i + 0.5) * points.length / k)].slice());
-    const ids = new Uint8Array(points.length);
-    for (let iter = 0; iter < 6; iter++) {
-      const acc = Array.from({ length: k }, () => [0, 0, 0, 0, 0]);
-      for (let i = 0; i < points.length; i++) {
-        let best = 0;
-        let bestD = Infinity;
-        for (let c = 0; c < k; c++) {
-          let d = 0;
-          for (let n = 0; n < 4; n++) {
-            const diff = points[i][n] - centers[c][n];
-            d += diff * diff * (n === 3 ? 0.35 : 1);
-          }
-          if (d < bestD) { bestD = d; best = c; }
-        }
-        ids[i] = best;
-        for (let n = 0; n < 4; n++) acc[best][n] += points[i][n];
-        acc[best][4] += 1;
+  // Lighting of the picked colors only, spread over the whole image: blur(light * mask) / blur(mask).
+  // Alpha carries the mask. Other materials add nothing and take their lighting from the picked neighbors.
+  // Lighting is smooth, so the blurs run on a quarter size image. Two widths: the fine one follows the
+  // lighting, the wide one fills the middle of big areas that the picked colors do not reach.
+  function lightField(src, coarse, picks, range) {
+    const masked = rt('lightM', width, height, true);
+    const uniforms = { uCount: picks.length, uRange: range };
+    for (let i = 0; i < 4; i++) uniforms['uPick' + i] = picks[i] || [1, 1, 1];
+    draw('lightmask', masked, { uSrc: src, uBlur: coarse }, uniforms);
+    const sw = Math.max(1, Math.ceil(width / 4));
+    const sh = Math.max(1, Math.ceil(height / 4));
+    const half = rt('lightD', Math.max(1, Math.ceil(width / 2)), Math.max(1, Math.ceil(height / 2)), true);
+    const small = rt('lightA', sw, sh, true);
+    draw('copy', half, { uTex: masked }, { uFlip: 0 });
+    draw('copy', small, { uTex: half }, { uFlip: 0 });
+    const horiz = rt('lightH', sw, sh, true);
+    const vert = rt('lightV', sw, sh, true);
+    let current = small;
+    const spread = (from, to) => {
+      for (let step = from; step <= to && step * 4 <= Math.max(sw, sh); step *= 2) {
+        draw('blurA', horiz, { uTex: current }, { uStep: [step / sw, 0] });
+        draw('blurA', vert, { uTex: horiz }, { uStep: [0, step / sh] });
+        current = vert;
       }
-      for (let c = 0; c < k; c++) {
-        if (!acc[c][4]) continue;
-        for (let n = 0; n < 4; n++) centers[c][n] = acc[c][n] / acc[c][4];
-      }
-    }
-    labels = ids;
-    labelW = aw;
-    labelH = ah;
+    };
+    spread(1, 8);
+    const fine = rt('lightF', sw, sh, true);
+    draw('copy', fine, { uTex: current }, { uFlip: 0 });
+    spread(16, 32);
+    return { fine, wide: current };
   }
 
-  function writeRegion(k, classes, metals) {
-    const data = new Uint8Array(labelW * labelH * 4);
-    for (let i = 0; i < labels.length; i++) {
-      const id = Math.min(k - 1, labels[i]);
-      const info = CLASSES[classes[id]] || CLASSES.asphalt;
-      const metal = Number.isFinite(metals[id]) ? metals[id] : info.metal;
-      data[i * 4] = Math.round(info.rough * 255);
-      data[i * 4 + 1] = Math.round(Math.max(0, Math.min(1, metal)) * 255);
-      data[i * 4 + 2] = id;
-      data[i * 4 + 3] = 255;
+  // Mean color of the brightest 30% of a blurred image: the lit level that cast shadows are lifted to.
+  function litColor(blurred) {
+    const small = rt('lit', 32, 32);
+    draw('copy', small, { uTex: blurred }, { uFlip: 0 });
+    const buf = read(small);
+    const lumas = [];
+    for (let i = 0; i < buf.length; i += 4) lumas.push(0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2]);
+    const cut = [...lumas].sort((a, b) => a - b)[Math.floor(lumas.length * 0.7)];
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < buf.length; i += 4) {
+      if (lumas[i / 4] < cut) continue;
+      r += buf[i]; g += buf[i + 1]; b += buf[i + 2]; n++;
     }
-    const dest = rt('region', labelW, labelH);
-    gl.bindTexture(gl.TEXTURE_2D, dest.tex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, labelW, labelH, gl.RGBA, gl.UNSIGNED_BYTE, data);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    return dest;
+    return [r / n / 255, g / n / 255, b / n / 255];
+  }
+
+  // Least-squares fit of a smooth field over the image: a quadratic per axis, or the first harmonic on
+  // axes that tile, so the field repeats with the tile. Returns the coefficients without the constant.
+  function fitField(src, periodic, useLog) {
+    const n = 16;
+    let current = src;
+    let w = width;
+    let h = height;
+    for (let i = 0; Math.max(w, h) > n; i++) {
+      w = Math.max(1, Math.ceil(w / 2));
+      h = Math.max(1, Math.ceil(h / 2));
+      const next = rt('fit' + i, w, h);
+      draw('copy', next, { uTex: current }, { uFlip: 0 });
+      current = next;
+    }
+    const buf = read(current);
+    const A = Array.from({ length: 6 }, () => new Float64Array(7));
+    for (let row = 0; row < h; row++) {
+      for (let x = 0; x < w; x++) {
+        const i = (row * w + x) * 4;
+        const lum = (0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2]) / 255;
+        const value = useLog ? Math.log(Math.max(lum, 0.002)) : buf[i] / 255;
+        const b = fieldBasis((x + 0.5) / w, 1 - (row + 0.5) / h, periodic);
+        for (let r = 0; r < 6; r++) {
+          for (let c = 0; c < 6; c++) A[r][c] += b[r] * b[c];
+          A[r][6] += b[r] * value;
+        }
+      }
+    }
+    for (let r = 0; r < 6; r++) A[r][r] += 1e-6;
+    for (let c = 0; c < 6; c++) {
+      let pivot = c;
+      for (let r = c + 1; r < 6; r++) if (Math.abs(A[r][c]) > Math.abs(A[pivot][c])) pivot = r;
+      [A[c], A[pivot]] = [A[pivot], A[c]];
+      for (let r = 0; r < 6; r++) {
+        if (r === c) continue;
+        const f = A[r][c] / A[c][c];
+        for (let k = c; k < 7; k++) A[r][k] -= f * A[c][k];
+      }
+    }
+    const coef = A.map((row, i) => row[6] / row[i]);
+    return { uFitA: [coef[1], coef[2], coef[3]], uFitB: [coef[4], coef[5]], uPeriodic: periodic };
   }
 
   function fitLight(albedo, normal) {
@@ -1341,13 +1522,22 @@ export function createEngine(canvas) {
     const lx = (b0 * a11 - b1 * a01) / det;
     const ly = (b1 * a00 - b0 * a01) / det;
     const len = Math.hypot(lx, ly, 0.6) || 1;
-    return [lx / len, ly / len, 0.6 / len];
+    const light = [lx / len, ly / len, 0.6 / len];
+    let shade = 0;
+    for (let i = 0; i < n * n; i++) {
+      const nx = nb[i * 4] / 255 * 2 - 1;
+      const ny = nb[i * 4 + 1] / 255 * 2 - 1;
+      const nz = nb[i * 4 + 2] / 255 * 2 - 1;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      const dot = nx / nl * light[0] + ny / nl * light[1] + nz / nl * light[2];
+      shade += Math.min(1, Math.max(0.15, dot));
+    }
+    return { light, mean: shade / (n * n) };
   }
 
   function setSource(image) {
     if (sourceTex) gl.deleteTexture(sourceTex);
     sourceTex = image ? uploadImage(image) : null;
-    labels = null;
   }
 
   function setLoaded(name, image) {
@@ -1370,40 +1560,62 @@ export function createEngine(canvas) {
     const photo = rt('lin', width, height);
     draw('linear', photo, { uTex: sourceTex }, {});
     let albSource = photo;
-    if (params.albedoMode === 'load' && loaded.albedo) {
-      albSource = rt('tmpA', width, height);
-      draw('linear', albSource, { uTex: loaded.albedo }, {});
+    const periodic = [params.tileOn && params.tileX ? 1 : 0, params.tileOn && params.tileY ? 1 : 0];
+    if (params.albedoFix && (params.evenOut > 0 || params.brightX || params.brightY)) {
+      const evened = rt('even', width, height);
+      draw('even', evened, { uTex: photo }, {
+        ...fitField(photo, periodic, true),
+        uEven: params.evenOut,
+        uShift: [params.brightX, params.brightXPos, params.brightY, params.brightYPos],
+      });
+      albSource = evened;
     }
     const albedo = rt('albedo', width, height);
-    const skipDelight = params.albedoMode === 'load' && loaded.albedo && !params.delightLoaded;
     let shadeScale = 1;
-    if (skipDelight) {
+    const white = params.whiteBalance || [1, 1, 1];
+    const balanceOn = Math.max(Math.abs(white[0] - 1), Math.abs(white[1] - 1), Math.abs(white[2] - 1)) > 0.001;
+    const shadowOn = params.shadowFix > 0.001;
+    const picks = params.lightColors || [];
+    const colorOn = picks.length > 0 && (params.lightStrength || 0) > 0.001;
+    if (!params.albedoFix && !shadowOn && !balanceOn && !colorOn) {
       draw('copy', albedo, { uTex: albSource }, { uFlip: 0 });
     } else {
-      const coarse = blurCoarse(albSource);
-      const delighted = rt('blur8', width, height);
-      const white = params.whiteBalance || [1, 1, 1];
-      draw('delight', delighted, { uSrc: albSource, uBlur: coarse }, {
-        uStrength: params.delight,
-        uHighlight: params.highlight,
+      const coarse = params.albedoFix || shadowOn || colorOn ? blurCoarse(albSource) : albSource;
+      const field = colorOn ? lightField(albSource, coarse, picks, params.lightRange) : { fine: coarse, wide: coarse };
+      const delighted = rt('delighted', width, height);
+      draw('delight', delighted, { uSrc: albSource, uBlur: coarse, uField: field.fine, uFieldWide: field.wide }, {
+        uMasked: colorOn ? 1 : 0,
+        uLit: shadowOn ? litColor(coarse) : [1, 1, 1],
+        uStrength: colorOn ? params.lightStrength : (params.albedoFix ? params.delight : 0),
+        uHighlight: params.albedoFix ? params.highlight : 0,
+        uShadow: params.shadowFix || 0,
         uWhite: white,
       });
-      const mean = meanOf(delighted);
-      const luma = 0.2126 * mean[0] + 0.7152 * mean[1] + 0.0722 * mean[2];
-      const scale = params.targetMean / Math.max(0.02, luma);
-      shadeScale = scale;
-      draw('norm', albedo, { uTex: delighted }, { uScale: scale });
+      if (params.albedoFix) {
+        const mean = meanOf(delighted);
+        const luma = 0.2126 * mean[0] + 0.7152 * mean[1] + 0.0722 * mean[2];
+        const scale = params.targetMean / Math.max(0.02, luma);
+        shadeScale = scale;
+        draw('norm', albedo, { uTex: delighted }, { uScale: scale });
+      } else draw('copy', albedo, { uTex: delighted }, { uFlip: 0 });
     }
 
     const albPyramid = blurPyramid(albedo, 'a');
     let heightMap = rt('height', width, height, true);
-    draw('height', heightMap, { uAlb: albedo, uSrc: photo, uB0: albPyramid[0], uB1: albPyramid[1], uB2: albPyramid[2], uB3: albPyramid[3] }, {
-      uReliefMix: params.heightRelief,
-      uContrast: params.heightContrast,
-      uBias: params.heightBias,
-      uShadeScale: shadeScale,
-      uW: params.heightWeights,
-    });
+    const drawHeight = (pyramid) => {
+      draw('height', heightMap, { uAlb: albedo, uSrc: albSource, uB0: pyramid[0], uB1: pyramid[1], uB2: pyramid[2], uB3: pyramid[3] }, {
+        uReliefMix: params.heightRelief,
+        uContrast: params.heightContrast,
+        uBias: params.heightBias,
+        uShadeScale: shadeScale,
+        uW: params.heightWeights,
+      });
+      if (params.heightLevel <= 0) return;
+      const leveled = rt('blurTmp', width, height, true);
+      draw('level', leveled, { uH: heightMap }, { ...fitField(heightMap, periodic, false), uAmount: params.heightLevel });
+      draw('copy', heightMap, { uTex: leveled }, { uFlip: 0 });
+    };
+    drawHeight(albPyramid);
     if (params.heightMode === 'load' && loaded.height) {
       heightMap = rt('heightL', width, height, true);
       draw('copy', heightMap, { uTex: loaded.height }, { uFlip: params.invertHeight ? 1 : 0 });
@@ -1425,15 +1637,13 @@ export function createEngine(canvas) {
       uFlip: params.flipY ? 1 : 0,
     });
     if (reliefOn) {
-      const light = fitLight(albedo, normal);
-      draw('relief', albedo, { uAlb: albedo, uN: normal }, { uLight: light, uStrength: params.relief });
-      draw('height', heightMap, { uAlb: albedo, uSrc: photo, uB0: albPyramid[0], uB1: albPyramid[1], uB2: albPyramid[2], uB3: albPyramid[3] }, {
-        uReliefMix: params.heightRelief,
-        uContrast: params.heightContrast,
-        uBias: params.heightBias,
-        uShadeScale: shadeScale,
-        uW: params.heightWeights,
+      const fitted = fitLight(albedo, normal);
+      const relieved = rt('reliefOut', width, height);
+      draw('relief', relieved, { uAlb: albedo, uN: normal }, {
+        uLight: fitted.light, uStrength: params.relief, uMean: fitted.mean, uFadeHi: params.albedoFix ? 1 : 0,
       });
+      draw('copy', albedo, { uTex: relieved }, { uFlip: 0 });
+      drawHeight(albPyramid);
       const again = blurPyramid(heightMap, hPrefix);
       draw('normal', normal, { uH: heightMap, uB0: again[0], uB1: again[1], uB2: again[2] }, {
         uTexel: texel,
@@ -1488,7 +1698,7 @@ export function createEngine(canvas) {
       draw('nsmooth', normal, { uTex: a }, { uStep: [0, r2 / height] });
     }
 
-    const addDetail = (target, generate, enabled, amount) => {
+    const addDetail = (target, generate, enabled, amount, size) => {
       if (!enabled || amount <= 0) return;
       const gen = rt('detailGen', width, height, true);
       generate(gen);
@@ -1496,7 +1706,7 @@ export function createEngine(canvas) {
       const merged = rt('tmpA', width, height);
       draw('addHP', merged, { uBase: target, uGen: gen, uB0: pyramid[0], uB1: pyramid[1], uB2: pyramid[2] }, {
         uGain: amount,
-        uSize: params.mapDetailSize,
+        uSize: size,
       });
       draw('copy', target, { uTex: merged }, { uFlip: 0 });
     };
@@ -1508,23 +1718,32 @@ export function createEngine(canvas) {
     });
     if (params.aoMode === 'load' && loaded.ao) {
       draw('copy', ao, { uTex: loaded.ao }, { uFlip: params.invertAo ? 1 : 0 });
-      addDetail(ao, makeAo, params.addAoDetail, params.aoDetailAmount);
+      addDetail(ao, makeAo, params.addAoDetail, params.aoDetailAmount, params.aoDetailSize);
     } else if (params.aoMode === 'flat') draw('fill', ao, {}, { uColor: [params.flatAo, params.flatAo, params.flatAo, 1] });
     else makeAo(ao);
 
-    const nextKey = params.regionCount + ':' + width + ':' + (sourceTex ? 1 : 0);
-    if (!labels || labelKey !== nextKey) {
-      cluster(albedo, heightMap, params.regionCount);
-      labelKey = nextKey;
-    }
-    const region = writeRegion(params.regionCount, params.regionClass, params.regionMetal);
+    const zoneSrc = rt('zoneBlur', width, height);
+    const zoneTmp = rt('tmpB', width, height);
+    draw('blur', zoneTmp, { uTex: photo }, { uStep: [1.5 / width, 0] });
+    draw('blur', zoneSrc, { uTex: zoneTmp }, { uStep: [0, 1.5 / height] });
+    const zoneColor = new Float32Array(24);
+    const zoneMat = new Float32Array(24);
+    params.zones.slice(0, 6).forEach((zone, i) => {
+      zoneColor.set([zone.color[0], zone.color[1], zone.color[2], zone.range], i * 4);
+      zoneMat.set([zone.rough, zone.metal, zone.opacity, 1], i * 4);
+    });
+    const zoneUniforms = { uZoneColor: zoneColor, uZoneMat: zoneMat, uBase: params.zoneBase, uCount: Math.min(6, params.zones.length) };
+    const zones = rt('zones', width, height);
+    draw('zones', zones, { uTex: zoneSrc }, { ...zoneUniforms, uShow: 0 });
+    const zoneView = rt('zoneView', width, height);
+    draw('zones', zoneView, { uTex: zoneSrc }, { ...zoneUniforms, uShow: 1 });
 
     const rough = rt('rough', width, height);
     const makeRough = (target) => {
       const nBlur = rt('tmpB', width, height);
       draw('blur', nBlur, { uTex: normal }, { uStep: [2 / width, 2 / height] });
       draw('rough', target, {
-        uRegion: region, uAO: ao, uH: heightMap, uHb: hPyramid[1], uHf: hPyramid[0], uAlb: albedo, uNb: nBlur,
+        uZones: zones, uAO: ao, uH: heightMap, uHb: hPyramid[1], uHf: hPyramid[0], uAlb: albedo, uNb: nBlur,
       }, {
         uCavity: params.cavityRough,
         uWear: params.wearRough,
@@ -1538,29 +1757,29 @@ export function createEngine(canvas) {
     };
     if (params.roughMode === 'load' && loaded.roughness) {
       draw('copy', rough, { uTex: loaded.roughness }, { uFlip: 0 });
-      addDetail(rough, makeRough, params.addRoughDetail, params.roughDetailAmount);
+      addDetail(rough, makeRough, params.addRoughDetail, params.roughDetailAmount, params.roughDetailSize);
     } else if (params.roughMode === 'flat') draw('fill', rough, {}, { uColor: [params.flatRough, params.flatRough, params.flatRough, 1] });
     else makeRough(rough);
     const metal = rt('metal', width, height);
-    const makeMetal = (target) => draw('metal', target, { uRegion: region, uH: heightMap, uHb: hPyramid[1] }, { uWear: params.metalWear, uSharp: params.metalSharp });
+    const makeMetal = (target) => draw('metal', target, { uZones: zones, uH: heightMap, uHb: hPyramid[1] }, { uWear: params.metalWear, uSharp: params.metalSharp });
     if (params.metalMode === 'load' && loaded.metallic) {
       draw('copy', metal, { uTex: loaded.metallic }, { uFlip: 0 });
-      addDetail(metal, makeMetal, params.addMetalDetail, params.metalDetailAmount);
+      addDetail(metal, makeMetal, params.addMetalDetail, params.metalDetailAmount, params.metalDetailSize);
     } else if (params.metalMode === 'flat') draw('fill', metal, {}, { uColor: [params.flatMetal, params.flatMetal, params.flatMetal, 1] });
     else makeMetal(metal);
 
     const opacity = rt('opacity', width, height);
     if (params.opacityMode === 'load' && loaded.opacity) {
-      draw('opacity', opacity, { uH: heightMap, uHb: hPyramid[1], uRegion: region, uLoaded: loaded.opacity }, {
+      draw('opacity', opacity, { uH: heightMap, uHb: hPyramid[1], uZones: zones, uLoaded: loaded.opacity }, {
         uEdge: params.opacityEdge, uRagged: params.opacityRagged, uPatch: params.opacityPatch,
-        uCrack: params.opacityCrack, uRegionPick: params.opacityRegion, uUseLoaded: 1,
+        uCrack: params.opacityCrack, uUseLoaded: 1,
       });
     } else if (params.opacityMode === 'flat') {
       draw('fill', opacity, {}, { uColor: [params.flatOpacity, params.flatOpacity, params.flatOpacity, 1] });
     } else {
-      draw('opacity', opacity, { uH: heightMap, uHb: hPyramid[1], uRegion: region, uLoaded: albedo }, {
+      draw('opacity', opacity, { uH: heightMap, uHb: hPyramid[1], uZones: zones, uLoaded: albedo }, {
         uEdge: params.opacityEdge, uRagged: params.opacityRagged, uPatch: params.opacityPatch,
-        uCrack: params.opacityCrack, uRegionPick: params.opacityRegion, uUseLoaded: 0,
+        uCrack: params.opacityCrack, uUseLoaded: 0,
       });
     }
 
@@ -1584,7 +1803,7 @@ export function createEngine(canvas) {
     mipped.clear();
     finals.detail = detail;
     finals.photo = photo;
-    finals.region = region;
+    finals.zones = zoneView;
     rts.forEach((target, name) => {
       if (used.has(name) || name.startsWith('env')) return;
       gl.deleteTexture(target.tex);
@@ -1853,7 +2072,7 @@ export function createEngine(canvas) {
       rough: [finals.rough, 2],
       metal: [finals.metal, 2],
       opacity: [finals.opacity, 2],
-      region: [finals.region, 1],
+      zones: [finals.zones, 0],
     };
     const repeat = params.layout || [1, 1];
     const zoom = params.zoom > 0 ? params.zoom : 1;
@@ -1958,7 +2177,6 @@ export function createEngine(canvas) {
     screenH = h;
     canvas.width = w;
     canvas.height = h;
-    labels = null;
   }
 
   function readMap(name) {
@@ -1987,7 +2205,6 @@ export function createEngine(canvas) {
     if (maskTex) gl.deleteTexture(maskTex);
     sourceTex = null;
     maskTex = null;
-    labels = null;
     Object.keys(finals).forEach((key) => delete finals[key]);
     gl.getError();
   }

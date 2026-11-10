@@ -1,0 +1,13 @@
+{
+  "name": "material-wizard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/keys.mjs test/export.test.mjs test/tile.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "serve": "14.2.5"
+  }
+}
