@@ -1,0 +1,58 @@
+:root {
+  --mw-ctl: rgba(255, 255, 255, 0.8);
+  --mw-hover: rgba(255, 255, 255, 0.13);
+  --mw-press: #fff;
+  --mw-press-text: #000;
+  --mw-field: rgba(255, 255, 255, 0.8);
+  --mw-field-hover: rgba(255, 255, 255, 0.87);
+  --mw-field-focus: #fff;
+  --mw-field-text: #000;
+  --mw-field-line: transparent;
+  --mw-field-line-hover: transparent;
+  --mw-field-line-focus: #fff;
+  --mw-track: rgba(255, 255, 255, 0.29);
+}
+
+[data-theme="light"] {
+  --mw-ctl: rgba(0, 0, 0, 0.6);
+  --mw-hover: rgba(0, 0, 0, 0.08);
+  --mw-press: #000;
+  --mw-press-text: #fff;
+  --mw-field: #fff;
+  --mw-field-hover: #fff;
+  --mw-field-focus: #fff;
+  --mw-field-text: #000;
+  --mw-field-line: rgba(0, 0, 0, 0.46);
+  --mw-field-line-hover: rgba(0, 0, 0, 0.6);
+  --mw-field-line-focus: #000;
+  --mw-track: rgba(0, 0, 0, 0.25);
+}
+
+/* Dragging and long-pressing the chrome should not highlight it. Text fields, warnings and the version stay selectable. */
+.mw-top,
+.mw-page,
+.mw-appbar,
+.mw-top *,
+.mw-page *,
+.mw-appbar * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.mw-page :is(input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]), textarea),
+.mw-version,
+.mw-warnings,
+.mw-warnings * {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+a, button, summary, label, select { -webkit-tap-highlight-color: transparent; }
+
+.mw-thumb, canvas, img { -webkit-user-drag: none; }
+
+html:lang(zh) { --font: "Site UI", "Microsoft YaHei UI", "Noto Sans CJK SC", "PingFang SC", system-ui, sans-serif; }
+
+html:lang(ja) { --font: "Site UI", "Yu Gothic UI", "Noto Sans CJK JP", "Hiragino Sans", system-ui, sans-serif; }

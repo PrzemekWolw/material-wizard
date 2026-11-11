@@ -1,0 +1,15 @@
+export const CLASSES = {
+  asphalt: { rough: 0.85, metal: 0 },
+  concrete: { rough: 0.72, metal: 0 },
+  paint: { rough: 0.35, metal: 0 },
+  bareMetal: { rough: 0.22, metal: 1 },
+  rubber: { rough: 0.92, metal: 0 },
+  fabric: { rough: 0.95, metal: 0 },
+  dirt: { rough: 0.9, metal: 0 },
+  wood: { rough: 0.55, metal: 0 },
+  grass: { rough: 0.9, metal: 0 },
+  leaves: { rough: 0.75, metal: 0 },
+  stone: { rough: 0.8, metal: 0 },
+  sand: { rough: 0.95, metal: 0 },
+  rust: { rough: 0.85, metal: 0 },
+};

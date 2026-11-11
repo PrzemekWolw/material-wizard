@@ -1,3 +1,5 @@
+import { TERRAIN_GROUPS } from './utils/terrain.js';
+
 const CRC_TABLE = new Uint32Array(256);
 for (let n = 0; n < 256; n++) {
   let c = n;
@@ -25,6 +27,9 @@ async function inflateRaw(data, size) {
 function u16(n) { return [n & 255, (n >> 8) & 255]; }
 function u32(n) { return [n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >> 24) & 255]; }
 
+// Already compressed, so a deflate attempt only costs time.
+const STORED = /\.(png|jpe?g|webp)$/i;
+
 export async function zipStore(files) {
   const parts = [];
   const central = [];
@@ -32,7 +37,7 @@ export async function zipStore(files) {
   for (const file of files) {
     const name = new TextEncoder().encode(file.name);
     const raw = file.data;
-    const packed = await deflateRaw(raw);
+    const packed = STORED.test(file.name) ? null : await deflateRaw(raw);
     const data = packed || raw;
     const method = packed ? 8 : 0;
     const crc = crc32(raw);
@@ -120,20 +125,30 @@ export async function readProject(bytes) {
     if (!files['lights/' + i + '.png']) throw new Error('missing light');
   }
   if (session.mask && !files['mask.png']) throw new Error('missing mask');
+  if (session.layers) {
+    for (const which of ['detail', 'macro']) {
+      const layer = session.layers[which];
+      if (!layer || !layer.photo) continue;
+      const dir = 'layers/' + which + '/';
+      if (!files[dir + layer.photo]) throw new Error('missing photo');
+      for (const name of layer.maps || []) {
+        if (!MAP_SLOTS.includes(name) || !files[dir + 'maps/' + name + '.png']) throw new Error('missing map ' + name);
+      }
+      for (let i = 0; i < (layer.lights || []).length; i++) {
+        if (!files[dir + 'lights/' + i + '.png']) throw new Error('missing light');
+      }
+      if (layer.mask && !files[dir + 'mask.png']) throw new Error('missing mask');
+    }
+  }
   return { session, files, photo };
 }
 
-export function pngBytes(rgba, w, h) {
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
-  return new Promise((resolve) => {
-    canvas.toBlob(async (blob) => {
-      resolve(new Uint8Array(await blob.arrayBuffer()));
-    }, 'image/png');
-  });
+// Encodes without copying the pixels. Works in the page and in a worker.
+export async function pngBytes(rgba, w, h) {
+  const canvas = new OffscreenCanvas(w, h);
+  canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, w * h * 4), w, h), 0, 0);
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 function pngChunk(type, data) {
@@ -148,15 +163,16 @@ function pngChunk(type, data) {
   return out;
 }
 
-// 8-bit grayscale PNG from the R channel. Rows use the Up filter.
-export async function grayPngBytes(rgba, w, h) {
+// 8-bit grayscale PNG. Pixel (x, y) is pixels[y * stride + x * step]: the R channel of RGBA by default,
+// or a packed gray buffer with step 1. Rows use the Up filter.
+export async function grayPngBytes(pixels, w, h, stride = w * 4, step = 4) {
   const raw = new Uint8Array((w + 1) * h);
   for (let y = 0; y < h; y++) {
     const row = y * (w + 1);
     raw[row] = 2;
     for (let x = 0; x < w; x++) {
-      const v = rgba[(y * w + x) * 4];
-      const up = y ? rgba[((y - 1) * w + x) * 4] : 0;
+      const v = pixels[y * stride + x * step];
+      const up = y ? pixels[(y - 1) * stride + x * step] : 0;
       raw[row + 1 + x] = (v - up) & 255;
     }
   }
@@ -223,8 +239,50 @@ export function materialDocument(opts) {
   return { [n]: mat };
 }
 
+// Detail and macro files of a terrain material, by group suffix.
+export function terrainFiles(name) {
+  return TERRAIN_GROUPS.map(([group, s]) => ({ group, suffix: s, detail: 't_' + name + '_' + s + '.png', macro: 't_macro_' + name + '_' + s + '.png' }));
+}
+
+// A TerrainMaterial entry. The base textures are placeholders for the level's shared t_terrain_base_* set.
+export function terrainDocument(opts) {
+  const folder = opts.folder.endsWith('/') ? opts.folder : opts.folder + '/';
+  const level = (/^\/?levels\/([^/]+)\//i.exec(folder) || [])[1] || 'example';
+  const baseFolder = '/levels/' + level + '/art/terrains/';
+  const t = opts.terrain;
+  const n = opts.name;
+  const mat = { name: n, internalName: n, class: 'TerrainMaterial', groundmodelName: opts.groundmodel, annotation: opts.annotation };
+  terrainFiles(n).forEach(({ group, suffix, detail, macro }) => {
+    const s = t.strengths[group].map(round3);
+    mat[group + 'BaseTex'] = baseFolder + 't_terrain_base_' + suffix + '.png';
+    mat[group + 'BaseTexSize'] = t.sizes[0];
+    mat[group + 'MacroTex'] = folder + macro;
+    mat[group + 'MacroTexSize'] = t.sizes[1];
+    mat[group + 'MacroStrength'] = [s[0], s[1]];
+    mat[group + 'DetailTex'] = folder + detail;
+    mat[group + 'DetailTexSize'] = t.sizes[2];
+    mat[group + 'DetailStrength'] = [s[2], s[3]];
+  });
+  mat.macroDistances = t.macroDistances.slice();
+  mat.detailDistances = t.detailDistances.slice();
+  mat.macroDistAtten = t.macroDistAtten.map(round3);
+  mat.detailDistAtten = t.detailDistAtten.map(round3);
+  return { [n]: mat };
+}
+
 function round3(v) {
   return Math.round(v * 1000) / 1000;
+}
+
+// Fills {prefix}, {name} and {n} in a name pattern; {n:02} pads the number. Characters a material
+// name cannot hold become _.
+export function materialName(pattern, values) {
+  const out = String(pattern || '{prefix}{name}').replace(/\{(\w+)(?::(\d+))?\}/g, (match, key, pad) => {
+    const value = values[key];
+    if (value == null) return '';
+    return pad ? String(value).padStart(Number(pad), '0') : String(value);
+  });
+  return out.replace(/[^a-z0-9_-]+/gi, '_') || values.name;
 }
 
 export function textureLengthFor(roadWidth, outW, outH) {

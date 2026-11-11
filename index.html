@@ -45,7 +45,68 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%23f15a22' width='100' height='100'/><text x='50' y='50' font-family='Segoe UI,sans-serif' font-size='56' font-weight='600' fill='%23fff' text-anchor='middle' dominant-baseline='central'>C/K</text></svg>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="../style.css">
-  <link rel="stylesheet" href="./material-wizard.css">
+  <link rel="modulepreload" href="./src/services/i18n.js">
+  <link rel="modulepreload" href="./src/shaders/common.glsl.js">
+  <link rel="modulepreload" href="./src/shaders/basic.glsl.js">
+  <link rel="modulepreload" href="./src/shaders/albedo.glsl.js">
+  <link rel="modulepreload" href="./src/shaders/surface.glsl.js">
+  <link rel="modulepreload" href="./src/shaders/sky.glsl.js">
+  <link rel="modulepreload" href="./src/shaders/lit.glsl.js">
+  <link rel="modulepreload" href="./src/shaders/post.glsl.js">
+  <link rel="modulepreload" href="./src/shaders/terrain.glsl.js">
+  <link rel="modulepreload" href="./src/engine/targets.js">
+  <link rel="modulepreload" href="./src/engine/fields.js">
+  <link rel="modulepreload" href="./src/utils/color.js">
+  <link rel="modulepreload" href="./src/utils/lut.js">
+  <link rel="modulepreload" href="./src/engine/maps.js">
+  <link rel="modulepreload" href="./src/engine/sky.js">
+  <link rel="modulepreload" href="./src/engine/lit.js">
+  <link rel="modulepreload" href="./src/engine/hdr.js">
+  <link rel="modulepreload" href="./src/engine/classes.js">
+  <link rel="modulepreload" href="./src/engine/engine.js">
+  <link rel="modulepreload" href="./src/utils/terrain.js">
+  <link rel="modulepreload" href="./src/export.js">
+  <link rel="modulepreload" href="./version.js">
+  <link rel="modulepreload" href="./src/tile/fft.js">
+  <link rel="modulepreload" href="./src/tile/seam.js">
+  <link rel="modulepreload" href="./src/tile/blend.js">
+  <link rel="modulepreload" href="./src/tile/geometry.js">
+  <link rel="modulepreload" href="./src/tile/lights.js">
+  <link rel="modulepreload" href="./src/tile/bomb.js">
+  <link rel="modulepreload" href="./src/tile/repeat.js">
+  <link rel="modulepreload" href="./src/tile/index.js">
+  <link rel="modulepreload" href="./src/jobs.js">
+  <link rel="modulepreload" href="./src/services/worker.js">
+  <link rel="modulepreload" href="./src/modules/exporter.js">
+  <link rel="modulepreload" href="./src/utils/images.js">
+  <link rel="modulepreload" href="./src/modules/batch.js">
+  <link rel="modulepreload" href="./src/modules/hdr.js">
+  <link rel="modulepreload" href="./src/modules/terrain.js">
+  <link rel="modulepreload" href="./src/modules/layers.js">
+  <link rel="modulepreload" href="./src/utils/sizes.js">
+  <link rel="modulepreload" href="./src/modules/view.js">
+  <link rel="modulepreload" href="./src/modules/zones.js">
+  <link rel="modulepreload" href="./src/modules/pick.js">
+  <link rel="modulepreload" href="./src/tile-editor.js">
+  <link rel="modulepreload" href="./src/modules/tiling.js">
+  <link rel="modulepreload" href="./src/modules/layout.js">
+  <link rel="modulepreload" href="./src/modules/slots.js">
+  <link rel="modulepreload" href="./src/services/presets.js">
+  <link rel="modulepreload" href="./src/modules/project.js">
+  <link rel="modulepreload" href="./src/modules/phone.js">
+  <link rel="modulepreload" href="./src/services/history.js">
+  <link rel="modulepreload" href="./src/modules/curve.js">
+  <link rel="modulepreload" href="./src/modules/render.js">
+  <link rel="modulepreload" href="./src/modules/sun.js">
+  <link rel="modulepreload" href="./src/services/state.js">
+  <link rel="modulepreload" href="./src/modules/tooltip.js">
+  <link rel="stylesheet" href="./styles/base.css">
+  <link rel="stylesheet" href="./styles/layout.css">
+  <link rel="stylesheet" href="./styles/panels.css">
+  <link rel="stylesheet" href="./styles/controls.css">
+  <link rel="stylesheet" href="./styles/maps.css">
+  <link rel="stylesheet" href="./styles/motion.css">
+  <link rel="stylesheet" href="./styles/phone.css">
 </head>
 <body>
   <header class="topnav mw-top">
@@ -98,6 +159,7 @@
         <div class="mw-seg">
           <button type="button" data-tile-view="frame" data-copy="ui.materialWizard.tile.viewFrame"></button>
           <button type="button" data-tile-view="tiled" data-copy="ui.materialWizard.tile.viewTiled"></button>
+          <button type="button" data-tile-view="repeat" data-copy="ui.materialWizard.tile.viewRepeat" data-title="ui.materialWizard.tile.viewRepeatTip"></button>
         </div>
         <label class="mw-tile-zoom"><span data-copy="ui.materialWizard.zoom"></span>
           <input type="range" id="tile-zoom" min="1" max="8" step="0.05" value="1" data-title="ui.materialWizard.tile.zoomTip">
@@ -133,11 +195,17 @@
             <option value="preview" data-copy="ui.materialWizard.views.preview"></option>
           </select>
         </label>
-        <label class="mw-field"><span data-copy="ui.materialWizard.previewShape"></span>
+        <label class="mw-field mw-regular"><span data-copy="ui.materialWizard.previewShape"></span>
           <select data-param="shape">
             <option value="plane" data-copy="ui.materialWizard.plane"></option>
             <option value="sphere" data-copy="ui.materialWizard.sphere"></option>
             <option value="cube" data-copy="ui.materialWizard.cube"></option>
+          </select>
+        </label>
+        <label class="mw-field mw-regular" data-title="ui.materialWizard.alphaViewTip"><span data-copy="ui.materialWizard.alphaView"></span>
+          <select data-param="alphaView">
+            <option value="checker" data-copy="ui.materialWizard.alphaChecker"></option>
+            <option value="background" data-copy="ui.materialWizard.alphaBackground"></option>
           </select>
         </label>
         <label class="mw-field"><span data-copy="ui.materialWizard.layout"></span>
@@ -167,18 +235,26 @@
     <div class="mw-split" id="split" role="separator" aria-orientation="vertical" tabindex="0" data-title="ui.materialWizard.splitTip"></div>
 
     <aside>
-      <nav class="mw-tabs" id="tabs">
-        <button type="button" data-tab="maps" class="is-active"><span data-copy="ui.materialWizard.tabs.maps"></span></button>
-        <button type="button" data-tab="fix"><span data-copy="ui.materialWizard.tabs.fix"></span></button>
-        <button type="button" data-tab="tile"><span data-copy="ui.materialWizard.tabs.tile"></span></button>
-        <button type="button" data-tab="albedo"><span data-copy="ui.materialWizard.tabs.albedo"></span></button>
-        <button type="button" data-tab="shape"><span data-copy="ui.materialWizard.tabs.shape"></span></button>
-        <button type="button" data-tab="surface"><span data-copy="ui.materialWizard.tabs.surface"></span></button>
-        <button type="button" data-tab="export"><span data-copy="ui.materialWizard.tabs.export"></span></button>
+      <nav class="mw-tabs" id="tabs" role="tablist">
+        <button type="button" role="tab" id="tab-maps" aria-controls="panel-maps" aria-selected="true" data-tab="maps" class="is-active"><span data-copy="ui.materialWizard.tabs.maps"></span></button>
+        <button type="button" role="tab" id="tab-fix" aria-controls="panel-fix" aria-selected="false" tabindex="-1" data-tab="fix"><span data-copy="ui.materialWizard.tabs.fix"></span></button>
+        <button type="button" role="tab" id="tab-tile" aria-controls="panel-tile" aria-selected="false" tabindex="-1" data-tab="tile"><span data-copy="ui.materialWizard.tabs.tile"></span></button>
+        <button type="button" role="tab" id="tab-albedo" aria-controls="panel-albedo" aria-selected="false" tabindex="-1" data-tab="albedo"><span data-copy="ui.materialWizard.tabs.albedo"></span></button>
+        <button type="button" role="tab" id="tab-shape" aria-controls="panel-shape" aria-selected="false" tabindex="-1" data-tab="shape"><span data-copy="ui.materialWizard.tabs.shape"></span></button>
+        <button type="button" role="tab" id="tab-surface" aria-controls="panel-surface" aria-selected="false" tabindex="-1" data-tab="surface"><span data-copy="ui.materialWizard.tabs.surface"></span></button>
+        <button type="button" role="tab" id="tab-export" aria-controls="panel-export" aria-selected="false" tabindex="-1" data-tab="export"><span data-copy="ui.materialWizard.tabs.export"></span></button>
       </nav>
 
-      <section class="mw-panel" data-panel="maps">
+      <section class="mw-panel" data-panel="maps" role="tabpanel" id="panel-maps" aria-labelledby="tab-maps">
         <h2 data-copy="ui.materialWizard.maps.title"></h2>
+        <div class="mw-seg" id="kind-seg" role="group" data-title="ui.materialWizard.kind.tip">
+          <button type="button" data-kind="regular" data-copy="ui.materialWizard.kind.regular"></button>
+          <button type="button" data-kind="terrain" data-copy="ui.materialWizard.kind.terrain"></button>
+        </div>
+        <select class="mw-hidden" data-param="kind" aria-hidden="true" tabindex="-1">
+          <option value="regular" selected>regular</option>
+          <option value="terrain">terrain</option>
+        </select>
         <p class="mw-note" data-copy="ui.materialWizard.maps.intro">Start with a photo. It is the base color, and the other maps are generated from it unless you load your own or set a flat value. A loaded height or normal feeds the maps that depend on it. Click a thumbnail to view it large.</p>
         <div class="mw-actions">
           <button type="button" id="open-photo" class="mw-primary"><i class="fa-regular fa-folder-open"></i> <span data-copy="ui.materialWizard.maps.open"></span></button>
@@ -211,6 +287,7 @@
           </label>
         </div>
         <div id="slots"></div>
+        <div class="mw-terrain" id="terrain"></div>
         <details class="mw-more">
           <summary data-copy="ui.materialWizard.maps.lights"></summary>
           <p class="mw-note" data-copy="ui.materialWizard.maps.lightsNote"></p>
@@ -223,7 +300,7 @@
         </details>
       </section>
 
-      <section class="mw-panel mw-hidden" data-panel="fix">
+      <section class="mw-panel mw-hidden" data-panel="fix" role="tabpanel" id="panel-fix" aria-labelledby="tab-fix">
         <h2 data-copy="ui.materialWizard.fix.title"></h2>
         <div class="mw-seg" id="fix-mode">
           <button type="button" data-fix-mode="rotate" class="is-active"><i class="fa-solid fa-rotate"></i> <span data-copy="ui.materialWizard.fix.straighten"></span></button>
@@ -269,7 +346,7 @@
         </div>
       </section>
 
-      <section class="mw-panel mw-hidden" data-panel="tile">
+      <section class="mw-panel mw-hidden" data-panel="tile" role="tabpanel" id="panel-tile" aria-labelledby="tab-tile">
         <h2 data-copy="ui.materialWizard.tile.title"></h2>
         <label class="mw-check"><input type="checkbox" data-param="tileOn"> <span data-copy="ui.materialWizard.tile.enable"></span></label>
         <label class="mw-check"><input type="checkbox" data-param="tileEven" checked> <span data-copy="ui.materialWizard.tile.even"></span></label>
@@ -330,6 +407,13 @@
           <input type="range" data-param="tileSoft" min="0" max="1" step="0.01" value="0.3">
         </label>
         <p class="mw-seam" id="seam-note"></p>
+        <h3 class="mw-sub" data-copy="ui.materialWizard.tile.bomb"></h3>
+        <label class="mw-field" data-title="ui.materialWizard.tile.bombTip"><span data-copy="ui.materialWizard.tile.bombAmount"></span>
+          <input type="range" data-param="bombAmount" min="0" max="1" step="0.01" value="0">
+        </label>
+        <label class="mw-field"><span data-copy="ui.materialWizard.tile.bombSeed"></span>
+          <input type="number" data-param="bombSeed" min="1" max="9999" step="1" value="1">
+        </label>
         <details class="mw-more">
           <summary data-copy="ui.materialWizard.tile.road"></summary>
           <label class="mw-field"><span data-copy="ui.materialWizard.tile.runs"></span>
@@ -349,7 +433,7 @@
         <p class="mw-note" id="repeat-note"></p>
       </section>
 
-      <section class="mw-panel mw-hidden" data-panel="albedo">
+      <section class="mw-panel mw-hidden" data-panel="albedo" role="tabpanel" id="panel-albedo" aria-labelledby="tab-albedo">
         <h2 data-copy="ui.materialWizard.albedo.title"></h2>
         <label class="mw-check"><input type="checkbox" data-param="albedoFix"> <span data-copy="ui.materialWizard.albedo.fix"></span></label>
         <p class="mw-note" data-copy="ui.materialWizard.albedo.fixNote"></p>
@@ -408,7 +492,7 @@
         </div>
       </section>
 
-      <section class="mw-panel mw-hidden" data-panel="shape">
+      <section class="mw-panel mw-hidden" data-panel="shape" role="tabpanel" id="panel-shape" aria-labelledby="tab-shape">
         <h2 data-copy="ui.materialWizard.shape.title"></h2>
         <label class="mw-field"><span data-copy="ui.materialWizard.shape.removed"></span>
           <input type="range" data-param="heightRelief" min="0" max="1" step="0.01" value="0.35">
@@ -478,7 +562,7 @@
         </div>
       </section>
 
-      <section class="mw-panel mw-hidden" data-panel="surface">
+      <section class="mw-panel mw-hidden" data-panel="surface" role="tabpanel" id="panel-surface" aria-labelledby="tab-surface">
         <h2 data-copy="ui.materialWizard.surface.title"></h2>
         <div id="zones"></div>
         <div class="mw-actions"><button type="button" id="add-zone" data-copy="ui.materialWizard.surface.addZone"></button></div>
@@ -498,6 +582,9 @@
         <label class="mw-field"><span data-copy="ui.materialWizard.surface.nvar"></span>
           <input type="range" data-param="nvarRough" min="0" max="1" step="0.01" value="0.2">
         </label>
+        <label class="mw-field" data-title="ui.materialWizard.surface.localRoughTip"><span data-copy="ui.materialWizard.surface.localRough"></span>
+          <input type="range" data-param="localRough" min="0" max="1" step="0.01" value="0">
+        </label>
         <label class="mw-field"><span data-copy="ui.materialWizard.surface.roughMin"></span>
           <input type="range" data-param="roughMin" min="0" max="1" step="0.01" value="0.15">
         </label>
@@ -516,38 +603,40 @@
             <input type="range" data-param="roughDetailSize" min="0" max="1" step="0.01" value="0.5">
           </label>
         </div>
-        <h2 data-copy="ui.materialWizard.surface.metal"></h2>
-        <label class="mw-field"><span data-copy="ui.materialWizard.surface.metalWear"></span>
-          <input type="range" data-param="metalWear" min="0" max="1" step="0.01" value="0">
-        </label>
-        <label class="mw-field"><span data-copy="ui.materialWizard.surface.metalSharp"></span>
-          <input type="range" data-param="metalSharp" min="1" max="8" step="0.1" value="1">
-        </label>
-        <div data-load-detail="metallic">
-          <label class="mw-check"><input type="checkbox" data-param="addMetalDetail"> <span data-copy="ui.materialWizard.shape.mapDetailMetal"></span></label>
-          <label class="mw-field"><span data-copy="ui.materialWizard.shape.detailStrength"></span>
-            <input type="range" data-param="metalDetailAmount" min="0" max="3" step="0.01" value="1">
+        <div class="mw-regular">
+          <h2 data-copy="ui.materialWizard.surface.metal"></h2>
+          <label class="mw-field"><span data-copy="ui.materialWizard.surface.metalWear"></span>
+            <input type="range" data-param="metalWear" min="0" max="1" step="0.01" value="0">
           </label>
-          <label class="mw-field"><span data-copy="ui.materialWizard.shape.mapDetailSize"></span>
-            <input type="range" data-param="metalDetailSize" min="0" max="1" step="0.01" value="0.5">
+          <label class="mw-field"><span data-copy="ui.materialWizard.surface.metalSharp"></span>
+            <input type="range" data-param="metalSharp" min="1" max="8" step="0.1" value="1">
+          </label>
+          <div data-load-detail="metallic">
+            <label class="mw-check"><input type="checkbox" data-param="addMetalDetail"> <span data-copy="ui.materialWizard.shape.mapDetailMetal"></span></label>
+            <label class="mw-field"><span data-copy="ui.materialWizard.shape.detailStrength"></span>
+              <input type="range" data-param="metalDetailAmount" min="0" max="3" step="0.01" value="1">
+            </label>
+            <label class="mw-field"><span data-copy="ui.materialWizard.shape.mapDetailSize"></span>
+              <input type="range" data-param="metalDetailSize" min="0" max="1" step="0.01" value="0.5">
+            </label>
+          </div>
+          <h2 data-copy="ui.materialWizard.surface.opacity"></h2>
+          <label class="mw-field"><span data-copy="ui.materialWizard.surface.edge"></span>
+            <input type="range" data-param="opacityEdge" min="0" max="0.5" step="0.01" value="0">
+          </label>
+          <label class="mw-field"><span data-copy="ui.materialWizard.surface.ragged"></span>
+            <input type="range" data-param="opacityRagged" min="0" max="2" step="0.01" value="0.4">
+          </label>
+          <label class="mw-field"><span data-copy="ui.materialWizard.surface.patch"></span>
+            <input type="range" data-param="opacityPatch" min="0" max="1" step="0.01" value="0">
+          </label>
+          <label class="mw-field"><span data-copy="ui.materialWizard.surface.cracks"></span>
+            <input type="range" data-param="opacityCrack" min="0" max="1" step="0.01" value="0">
           </label>
         </div>
-        <h2 data-copy="ui.materialWizard.surface.opacity"></h2>
-        <label class="mw-field"><span data-copy="ui.materialWizard.surface.edge"></span>
-          <input type="range" data-param="opacityEdge" min="0" max="0.5" step="0.01" value="0">
-        </label>
-        <label class="mw-field"><span data-copy="ui.materialWizard.surface.ragged"></span>
-          <input type="range" data-param="opacityRagged" min="0" max="2" step="0.01" value="0.4">
-        </label>
-        <label class="mw-field"><span data-copy="ui.materialWizard.surface.patch"></span>
-          <input type="range" data-param="opacityPatch" min="0" max="1" step="0.01" value="0">
-        </label>
-        <label class="mw-field"><span data-copy="ui.materialWizard.surface.cracks"></span>
-          <input type="range" data-param="opacityCrack" min="0" max="1" step="0.01" value="0">
-        </label>
       </section>
 
-      <section class="mw-panel mw-hidden" data-panel="export">
+      <section class="mw-panel mw-hidden" data-panel="export" role="tabpanel" id="panel-export" aria-labelledby="tab-export">
         <h2 data-copy="ui.materialWizard.export.title"></h2>
         <p class="mw-note" data-copy="ui.materialWizard.export.saveNote"></p>
         <label class="mw-text"><span data-copy="ui.materialWizard.maps.size"></span>
@@ -565,14 +654,14 @@
         <label class="mw-field full"><span data-copy="ui.materialWizard.export.folder"></span>
           <input type="text" data-param="folder" value="/levels/example/art/textures/">
         </label>
-        <label class="mw-field"><span data-copy="ui.materialWizard.export.profile"></span>
+        <label class="mw-field mw-regular"><span data-copy="ui.materialWizard.export.profile"></span>
           <select data-param="profile">
             <option value="level" data-copy="ui.materialWizard.export.level"></option>
             <option value="road" data-copy="ui.materialWizard.export.road"></option>
             <option value="vehicle" data-copy="ui.materialWizard.export.vehicle"></option>
           </select>
         </label>
-        <label class="mw-field"><span data-copy="ui.materialWizard.export.annotation"></span>
+        <label class="mw-field mw-regular"><span data-copy="ui.materialWizard.export.annotation"></span>
           <select data-param="annotation">
             <option>ASPHALT</option>
             <option>SOLID_LINE</option>
@@ -581,12 +670,25 @@
             <option>DIRT</option>
           </select>
         </label>
-        <label class="mw-field"><span data-copy="ui.materialWizard.export.alpha"></span>
+        <label class="mw-field mw-regular"><span data-copy="ui.materialWizard.export.alpha"></span>
           <input type="number" data-param="alphaRef" min="0" max="255" step="1" value="150">
         </label>
+        <label class="mw-field full mw-terrain" data-title="ui.materialWizard.terrain.groundmodelTip"><span data-copy="ui.materialWizard.terrain.groundmodel"></span>
+          <input type="text" data-param="tGround" value="GRASS">
+        </label>
+        <p class="mw-note mw-terrain" data-copy="ui.materialWizard.terrain.exportNote"></p>
+        <label class="mw-field full"><span data-copy="ui.materialWizard.export.prefix"></span>
+          <input type="text" data-param="prefix" value="">
+        </label>
+        <label class="mw-field full" data-title="ui.materialWizard.export.patternTip"><span data-copy="ui.materialWizard.export.pattern"></span>
+          <input type="text" data-param="namePattern" value="{prefix}{name}">
+        </label>
+        <p class="mw-note" id="name-preview"></p>
         <div class="mw-actions">
           <button type="button" id="download" class="mw-primary"><i class="fa-solid fa-download"></i> <span data-copy="ui.materialWizard.export.download"></span></button>
+          <button type="button" id="copy-json"><i class="fa-regular fa-copy"></i> <span data-copy="ui.materialWizard.export.copyJson"></span></button>
         </div>
+        <p class="mw-note" id="copy-note" aria-live="polite"></p>
         <h2 data-copy="ui.materialWizard.export.batch"></h2>
         <p class="mw-note" data-copy="ui.materialWizard.export.batchNote"></p>
         <input type="file" id="batch-folder" webkitdirectory multiple>

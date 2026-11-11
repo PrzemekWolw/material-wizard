@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { inflateSync } from 'node:zlib';
 import test from 'node:test';
-import { grayPngBytes, readProject, zipStore } from '../export.js';
+import { grayPngBytes, readProject, zipStore } from '../src/export.js';
 
 function u16(n) { return [n & 255, n >> 8]; }
 function u32(n) {

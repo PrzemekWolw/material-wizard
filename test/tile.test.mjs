@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { tileImages } from '../tile.js';
+import { tileImages } from '../src/tile/index.js';
 
 const off = { on: false, a: 0, b: 0 };
 const none = { left: off, right: off, up: off, down: off };

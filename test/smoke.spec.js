@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { gotoApp, keepDrawingBuffer } from './helpers.js';
+
+test.beforeEach(({ page }) => keepDrawingBuffer(page));
 
 test('load, render, save and reopen', async ({ page }) => {
   const errors = [];
@@ -9,7 +12,7 @@ test('load, render, save and reopen', async ({ page }) => {
     if (msg.text().includes('Failed to load resource')) return;
     errors.push(msg.text());
   });
-  await page.goto('/index.html');
+  await gotoApp(page);
   const png = await page.evaluate(() => {
     const c = document.createElement('canvas');
     c.width = c.height = 64;
@@ -49,7 +52,7 @@ test('load, render, save and reopen', async ({ page }) => {
   ]);
   const saved = await readFile(await download.path());
   await page.locator('#open-any').evaluate((input, list) => {
-    const file = new File([Uint8Array.from(list)], 'gravel.mwz', { type: 'application/zip' });
+    const file = new File([Uint8Array.from(list)], 'gravel.mwz', { type: 'application/x-material-wizard' });
     const transfer = new DataTransfer();
     transfer.items.add(file);
     input.files = transfer.files;

@@ -8,5 +8,8 @@ export default defineConfig({
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: false,
   },
-  use: { baseURL: 'http://127.0.0.1:4173' },
+  use: {
+    baseURL: 'http://127.0.0.1:4173',
+    launchOptions: process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
+  },
 });

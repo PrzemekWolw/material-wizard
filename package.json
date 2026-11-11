@@ -1,9 +1,11 @@
 {
   "name": "material-wizard",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "test": "node --test test/keys.mjs test/export.test.mjs test/tile.test.mjs",
+    "test": "node --test test/*.mjs",
+    "check": "for f in app.js sw.js version.js $(find src -name '*.js'); do node --check $f || exit 1; done",
     "test:browser": "playwright test"
   },
   "devDependencies": {

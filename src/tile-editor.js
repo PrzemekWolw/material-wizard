@@ -1,4 +1,4 @@
-import { homographyFromQuad } from './tile.js';
+import { homographyFromQuad } from './tile/index.js';
 
 const SIDES = ['left', 'right', 'up', 'down'];
 const KNOB = 7;

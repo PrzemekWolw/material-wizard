@@ -10,7 +10,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node --check app.js && node --check pbr.js && node --check tile.js && node --check tile-editor.js && node --check export.js && node --check sw.js && node --check version.js
+      - run: npm run check
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
