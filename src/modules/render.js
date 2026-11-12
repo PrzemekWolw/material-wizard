@@ -261,6 +261,11 @@ async function render() {
     p.textContent = state.sessionNote;
     warningsEl.appendChild(p);
   }
+  if (state.fileNote) {
+    const p = document.createElement('p');
+    p.textContent = state.fileNote;
+    warningsEl.appendChild(p);
+  }
   drop.classList.add('has-image');
   refreshEditor();
   return true;

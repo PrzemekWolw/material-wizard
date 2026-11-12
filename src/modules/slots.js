@@ -4,7 +4,7 @@ import { showView, slotThumbs, thumbCanvas } from './view.js';
 import { commit, remember } from '../services/history.js';
 import { text } from '../services/i18n.js';
 import { trackOpen } from '../services/progress.js';
-import { COLOR_SLOTS, FACTOR_SLOTS, SLOTS, VIEW_OF_SLOT, slotImages, warningsEl, state } from '../services/state.js';
+import { COLOR_SLOTS, FACTOR_SLOTS, SLOTS, VIEW_OF_SLOT, showFileNote, slotImages, state } from '../services/state.js';
 import { extract, loadImage } from '../utils/images.js';
 import { ADJUST_SLOTS, adjustMarkup } from './curve.js';
 
@@ -96,7 +96,7 @@ export function init() {
       await trackOpen(file, fn);
     } catch (error) {
       console.warn('open failed', error);
-      warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
+      showFileNote(text('ui.materialWizard.notes.badFile', { name: file.name }));
     }
   }
   document.body.addEventListener('change', async (event) => {

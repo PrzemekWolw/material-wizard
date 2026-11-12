@@ -11,6 +11,7 @@ export const state = {
   photoBytes: null,
   photoName: null,
   sessionNote: '',
+  fileNote: '',
   lights: [],
   whiteBalance: null,
   lightColors: [],
@@ -46,6 +47,16 @@ export const canvas = document.getElementById('view');
 export const drop = document.getElementById('drop');
 
 export const warningsEl = document.getElementById('warnings');
+
+// Render rebuilds #warnings, so a file error has to live here or the next frame deletes it.
+export function showFileNote(message) {
+  state.fileNote = message;
+  warningsEl.textContent = message;
+}
+
+export function clearFileNote() {
+  state.fileNote = '';
+}
 
 export const VIEW_OF_SLOT = { albedo: 'albedo', height: 'height', normal: 'normal', roughness: 'rough', metallic: 'metal', ao: 'ao', opacity: 'opacity' };
 

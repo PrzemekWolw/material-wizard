@@ -12,7 +12,7 @@ import { activeLayer, clearHistory, clearLayers, otherLayer, parkedStacks, reset
 import { applySnapshot, commit, knownEntry, redoStack, remember, syncHistoryButtons, takeSnapshot, undoStack } from '../services/history.js';
 import { text } from '../services/i18n.js';
 import { hideProgress, showProgress, trackOpen } from '../services/progress.js';
-import { SLOTS, drop, readParams, slotImages, warningsEl, state } from '../services/state.js';
+import { SLOTS, clearFileNote, drop, readParams, showFileNote, slotImages, state } from '../services/state.js';
 import { hasSource, imageBytes, keepSource, loadImage, paint } from '../utils/images.js';
 import { run } from '../services/worker.js';
 
@@ -37,6 +37,7 @@ export function useImage(image, file, bytes) {
   remember();
   state.projectHandle = null;
   state.sessionNote = '';
+  clearFileNote();
   SLOTS.forEach(([name]) => {
     if (name === 'albedo') return;
     delete slotImages[name];
@@ -372,7 +373,7 @@ function saveProgress(stage, fraction, vars) {
 function saveFailed(key, error) {
   console.warn('project save failed', error);
   hideStatus(0);
-  warningsEl.textContent = text('ui.materialWizard.notes.' + key);
+  showFileNote(text('ui.materialWizard.notes.' + key));
 }
 
 // The save dialog creates the file immediately, empty. This is that file until a checked write
@@ -478,6 +479,7 @@ export async function saveProject(as) {
       state.projectHandle = handle;
     }
     if (uncommitted === handle) uncommitted = null;
+    clearFileNote();
     showStatus(1, text('ui.materialWizard.save.saved', { name: picker ? handle.name : name }), false);
     hideStatus(2500);
   } finally {
@@ -498,7 +500,7 @@ async function takePhoto(file) {
     });
   } catch (error) {
     console.warn('open failed', error);
-    warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
+    showFileNote(text('ui.materialWizard.notes.badFile', { name: file.name }));
   }
 }
 
@@ -543,6 +545,7 @@ async function openProject(file) {
     if (versionNewer(session.version)) notes.push(text('ui.materialWizard.notes.newerFile', { v: session.version }));
     if (project.historyDropped) notes.push(text('ui.materialWizard.notes.historyDropped'));
     state.sessionNote = notes.join(' ');
+    clearFileNote();
     const history = project.history ? historyFrom(project.history, project.files) : null;
     clearLayers();
     applySnapshot({
@@ -585,7 +588,7 @@ async function openProject(file) {
   } catch (error) {
     console.warn('session open failed', error);
     hideProgress(0);
-    warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
+    showFileNote(text('ui.materialWizard.notes.badFile', { name: file.name }));
     return false;
   }
 }
@@ -605,6 +608,7 @@ function newProject() {
   applySnapshot(startSnapshot);
   state.projectHandle = null;
   state.sessionNote = '';
+  clearFileNote();
   state.adjustFrame = '';
   Object.assign(sunAngle, startSun);
   drawSunDial();

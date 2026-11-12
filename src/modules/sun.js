@@ -4,7 +4,7 @@ import { commit, remember } from '../services/history.js';
 import { text } from '../services/i18n.js';
 import { trackOpen } from '../services/progress.js';
 import { run } from '../services/worker.js';
-import { slotImages, warningsEl, state } from '../services/state.js';
+import { slotImages, showFileNote, warningsEl, state } from '../services/state.js';
 import { canvasFromRGBA, imageDataOf, loadImage } from '../utils/images.js';
 import { num } from '../utils/sizes.js';
 
@@ -179,7 +179,7 @@ export function init() {
       });
     } catch (error) {
       console.warn('open failed', error);
-      warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
+      showFileNote(text('ui.materialWizard.notes.badFile', { name: file.name }));
     }
   });
 

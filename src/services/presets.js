@@ -6,7 +6,7 @@ import { syncZones } from '../modules/zones.js';
 import { commit, remember } from './history.js';
 import { text } from './i18n.js';
 import { hideProgress, showProgress } from './progress.js';
-import { SLOTS, syncResets, warningsEl, state } from './state.js';
+import { SLOTS, showFileNote, syncResets, state } from './state.js';
 
 const PRESET_KEY = 'mw-presets';
 
@@ -164,7 +164,7 @@ export function init() {
     } catch (e) { /* not a preset file */ }
     if (!incoming || typeof incoming !== 'object') {
       hideProgress(0);
-      warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
+      showFileNote(text('ui.materialWizard.notes.badFile', { name: file.name }));
       return;
     }
     const presets = Object.assign(storedPresets(), incoming);
