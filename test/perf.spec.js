@@ -39,6 +39,9 @@ async function timeChange(page, change) {
   }, change);
 }
 
+// A 1024 photo through software GL takes a while on the CI runner.
+test.slow();
+
 test('performance and memory numbers', async ({ page }) => {
   await keepDrawingBuffer(page);
   await countTextureBytes(page);

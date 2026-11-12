@@ -39,9 +39,11 @@ async function compare(page, name, bytes) {
     return null;
   }
   const golden = await readFile(file);
+  // Base64 strings cross into the page far faster than arrays of numbers.
   return page.evaluate(async ({ a, b }) => {
-    const decode = async (list) => {
-      const bitmap = await createImageBitmap(new Blob([Uint8Array.from(list)]), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+    const decode = async (text) => {
+      const bytes = Uint8Array.from(atob(text), (ch) => ch.charCodeAt(0));
+      const bitmap = await createImageBitmap(new Blob([bytes]), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
       const c = new OffscreenCanvas(bitmap.width, bitmap.height);
       const g = c.getContext('2d');
       g.drawImage(bitmap, 0, 0);
@@ -60,7 +62,7 @@ async function compare(page, name, bytes) {
       if (d > 8) bad++;
     }
     return { mean: sum / x.data.length, max, bad: bad / x.data.length };
-  }, { a: [...bytes], b: [...golden] });
+  }, { a: Buffer.from(bytes).toString('base64'), b: golden.toString('base64') });
 }
 
 function expectClose(name, result, limits = { mean: 1, bad: 0.005 }) {
@@ -70,6 +72,9 @@ function expectClose(name, result, limits = { mean: 1, bad: 0.005 }) {
   expect.soft(result.mean, name + ' mean difference').toBeLessThan(limits.mean);
   expect.soft(result.bad, name + ' pixels off by more than 8').toBeLessThan(limits.bad);
 }
+
+// Software GL on CI renders these slowly, and they share the runner with other workers.
+test.slow();
 
 test('maps and the lit view match the golden images', async ({ page }) => {
   await keepDrawingBuffer(page);
