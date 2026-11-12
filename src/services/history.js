@@ -9,8 +9,6 @@ import { readValues, writePreset } from './presets.js';
 import { SLOTS, drop, slotImages, warningsEl, state } from './state.js';
 import { imageBytes, keepSource } from '../utils/images.js';
 
-const HISTORY_LIMIT = 30;
-
 // Snapshots further back than this store their images as file bytes, decoded again on undo.
 const KEEP_IMAGES = 3;
 
@@ -64,23 +62,34 @@ export function commit() {
   const now = takeSnapshot();
   if (sameSnapshot(state.held, now)) { state.held = null; return; }
   undoStack.push(state.held);
-  if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
   compact(undoStack);
   state.held = null;
   redoStack.length = 0;
   syncHistoryButtons();
 }
 
+// One { bytes } entry per image, shared by every snapshot that holds it. History has no step limit,
+// so a step that changes no image must not add bytes.
+const entries = new WeakMap();
+
+export function packedEntry(image) {
+  if (!entries.has(image)) {
+    const entry = imageBytes(image).then((bytes) => ({ bytes }));
+    entry.catch(() => entries.delete(image));
+    entries.set(image, entry);
+  }
+  return entries.get(image);
+}
+
+export function knownEntry(image) {
+  return entries.get(image) || null;
+}
+
 // Swaps the image references of a snapshot for { bytes }, in place once all are encoded.
 async function pack(snap) {
   if (snap.packing) return;
   snap.packing = true;
-  const done = new Map();
-  const bytes = async (image) => {
-    if (!image) return null;
-    if (!done.has(image)) done.set(image, { bytes: await imageBytes(image) });
-    return done.get(image);
-  };
+  const bytes = async (image) => image ? packedEntry(image) : null;
   const slots = {};
   for (const key of Object.keys(snap.slots)) slots[key] = await bytes(snap.slots[key]);
   const lights = [];
@@ -101,7 +110,9 @@ async function unpacked(snap) {
     if (!entry) return null;
     if (!done.has(entry)) {
       const blob = new Blob([entry.bytes]);
-      done.set(entry, keepSource(await createImageBitmap(blob), blob));
+      const decoded = keepSource(await createImageBitmap(blob), blob);
+      entries.set(decoded, Promise.resolve(entry));
+      done.set(entry, decoded);
     }
     return done.get(entry);
   };

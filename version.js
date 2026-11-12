@@ -1,4 +1,4 @@
-export const VERSION = '0.3.0';
+export const VERSION = '0.3.2';
 
 export function versionNewer(value) {
   const part = (text) => String(text || '0').split('.').map((n) => parseInt(n, 10) || 0);

@@ -111,6 +111,23 @@ export async function withLayer(which, fn) {
   }
 }
 
+export function parkedStacks(which) {
+  return stacks[which];
+}
+
+export function setParkedStacks(which, undo, redo) {
+  stacks[which] = { undo, redo };
+}
+
+export function clearHistory() {
+  state.held = null;
+  undoStack.length = 0;
+  redoStack.length = 0;
+  stacks.detail = { undo: [], redo: [] };
+  stacks.macro = { undo: [], redo: [] };
+  syncHistoryButtons();
+}
+
 export function clearLayers() {
   layers.detail = null;
   layers.macro = null;

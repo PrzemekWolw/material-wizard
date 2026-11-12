@@ -6,6 +6,14 @@
 @keyframes mw-bar-out { to { transform: translateY(100%); } }
 @keyframes mw-label-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes mw-label-out { to { opacity: 0; transform: translateY(6px); } }
+@keyframes mw-pop { from { opacity: 0; } }
+@keyframes mw-status-out { to { opacity: 0; transform: translateY(200px); } }
+/* Smoothstep-like: the dots crawl at the edges and race through the middle. */
+@keyframes mw-dot {
+  0% { transform: translateX(0); opacity: 1; animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); }
+  70% { transform: translateX(calc(100% + 4px)); opacity: 1; }
+  71%, 100% { transform: translateX(calc(100% + 4px)); opacity: 0; }
+}
 
 .mw-swipe-back { transition: transform 0.25s var(--ease), opacity 0.25s var(--ease); }
 
@@ -31,6 +39,12 @@
   .mw-enter > *,
   .mw-appbar,
   .mw-appbar button > span:last-child,
-  .mw-viewbar { animation: none !important; }
+  .mw-viewbar,
+  .mw-progress,
+  .mw-progress-text,
+  .mw-progress-dots i { animation: none !important; }
+  .mw-progress-dots i { display: none; }
+  .mw-progress.is-busy .mw-progress-dots { background: var(--accent); opacity: 0.3; }
+  .mw-progress-fill { transition: none; }
   .mw-swipe-back, .mw-appbar .mw-round, .mw-tip, .mw-thumb canvas, .mw-toggle, .mw-seg button, .mw-tabs button { transition: none; }
 }

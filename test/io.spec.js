@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { readProject } from '../src/export.js';
+import { readProject, zipStore } from '../src/export.js';
 import { gotoApp, keepDrawingBuffer, openCanvas, painted, settled } from './helpers.js';
 
 function drawStones(c) {
@@ -123,6 +123,80 @@ test('deep undo after several crops restores each photo', async ({ page }) => {
   expect(undone.out).toEqual([105, 131, 164, 205, 256]);
   await settled(page);
   expect(await page.evaluate(painted)).toBe(true);
+});
+
+test('undo history has no step limit and survives a saved project', async ({ page }) => {
+  test.setTimeout(90000);
+  await gotoApp(page);
+  await openCanvas(page, drawStones, 'stones.png');
+  await page.waitForFunction(painted, null, { timeout: 15000 });
+  const steps = await page.evaluate(async () => {
+    const { state } = await import('./src/services/state.js');
+    const history = await import('./src/services/history.js');
+    state.adjustFrame = '0.1,0.1,0.8,0.8';
+    document.getElementById('apply-crop').click();
+    const el = document.querySelector('[data-param="delight"]');
+    for (let i = 0; i < 40; i++) {
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      el.value = (0.2 + i * 0.02).toFixed(2);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    await history.undo();
+    return { undo: history.undoStack.length, redo: history.redoStack.length };
+  });
+  expect(steps).toEqual({ undo: 41, redo: 1 });
+  await expect.poll(() => page.evaluate(async () => {
+    const { undoStack } = await import('./src/services/history.js');
+    const cropped = undoStack.slice(2, -3);
+    if (!cropped.every((snap) => snap.packed)) return 0;
+    return new Set(cropped.map((snap) => snap.original)).size;
+  }), { timeout: 30000 }).toBe(1);
+
+  const saved = await save(page);
+  const project = await readProject(saved);
+  expect(project.history.undo.length).toBe(41);
+  expect(project.history.redo.length).toBe(1);
+  expect(Object.keys(project.files).filter((name) => name.startsWith('history/img/')).length).toBe(1);
+  expect(project.history.undo[2].photo).toBe('photo.png');
+  expect(project.session.view.tab).toBeTruthy();
+
+  await gotoApp(page);
+  await openProjectFile(page, saved, 'saved.mwz');
+  await page.waitForFunction(() => document.querySelector('#drop').classList.contains('has-image'));
+  const restored = await page.evaluate(async () => {
+    const { state } = await import('./src/services/state.js');
+    const history = await import('./src/services/history.js');
+    const delight = () => document.querySelector('[data-param="delight"]').value;
+    const out = { undo: history.undoStack.length, redo: history.redoStack.length, width: state.original.width, now: delight() };
+    await history.redo();
+    out.redone = delight();
+    await history.undo();
+    await history.undo();
+    out.undone = delight();
+    while (history.undoStack.length > 1) await history.undo();
+    out.first = state.original.width;
+    return out;
+  });
+  expect(restored).toEqual({ undo: 41, redo: 1, width: 205, now: '0.96', redone: '0.98', undone: '0.94', first: 256 });
+  await settled(page);
+  expect(await page.evaluate(painted)).toBe(true);
+});
+
+test('a broken history in a project is left out', async ({ page }) => {
+  await gotoApp(page);
+  await openCanvas(page, drawStones, 'stones.png');
+  await page.waitForFunction(painted, null, { timeout: 15000 });
+  const saved = await save(page);
+  const project = await readProject(saved);
+  const session = { ...project.session, history: { v: 1, undo: [{ photo: 'history/img/7.png', slots: {}, lights: [] }], redo: [] } };
+  const files = Object.entries(project.files).map(([name, data]) => ({ name, data: name === 'session.json' ? new TextEncoder().encode(JSON.stringify(session)) : data }));
+  const broken = await zipStore(files);
+  await gotoApp(page);
+  await openProjectFile(page, broken, 'broken.mwz');
+  await page.waitForFunction(() => document.querySelector('#drop').classList.contains('has-image'));
+  expect(await page.evaluate(async () => (await import('./src/services/history.js')).undoStack.length)).toBe(0);
+  await page.waitForFunction(() => document.querySelector('#warnings').textContent.includes('undo history'));
 });
 
 test('an 8192 export keeps the heap low', async ({ page }) => {

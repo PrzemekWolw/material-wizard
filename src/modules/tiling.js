@@ -319,7 +319,12 @@ let tileView = 'frame';
 
 let framing = false;
 
-function setTileView(view) {
+export function currentTileView() {
+  return tileView;
+}
+
+export function setTileView(view) {
+  if (![...document.querySelectorAll('[data-tile-view]')].some((el) => el.dataset.tileView === view)) return;
   tileView = view;
   refreshEditor();
 }

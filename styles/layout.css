@@ -71,6 +71,7 @@
   cursor: pointer;
 }
 .mw-item[hidden] { display: none; }
+.mw-item:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 .mw-item:focus-visible { background: var(--mw-hover); outline: none; }
 @media (hover: hover) { .mw-item:hover { background: var(--mw-hover); outline: none; } }
 .mw-item:active { background: var(--accent); color: #fff; }

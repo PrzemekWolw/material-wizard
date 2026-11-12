@@ -3,7 +3,8 @@ import { schedule } from './render.js';
 import { showView, slotThumbs, thumbCanvas } from './view.js';
 import { commit, remember } from '../services/history.js';
 import { text } from '../services/i18n.js';
-import { COLOR_SLOTS, FACTOR_SLOTS, SLOTS, VIEW_OF_SLOT, slotImages, state } from '../services/state.js';
+import { trackOpen } from '../services/progress.js';
+import { COLOR_SLOTS, FACTOR_SLOTS, SLOTS, VIEW_OF_SLOT, slotImages, warningsEl, state } from '../services/state.js';
 import { extract, loadImage } from '../utils/images.js';
 import { ADJUST_SLOTS, adjustMarkup } from './curve.js';
 
@@ -90,50 +91,72 @@ export function init() {
   orm.innerHTML = '<label class="mw-text"><span data-copy="ui.materialWizard.maps.unpack">' + text('ui.materialWizard.maps.unpack') + '</span> <input type="file" id="orm-file" accept="image/*"></label>'
     + '<select id="orm-order"><option value="orm" data-copy="ui.materialWizard.maps.orm">' + text('ui.materialWizard.maps.orm') + '</option><option value="arm" data-copy="ui.materialWizard.maps.rma">' + text('ui.materialWizard.maps.rma') + '</option></select>';
   slotHost.appendChild(orm);
+  async function openTracked(file, fn) {
+    try {
+      await trackOpen(file, fn);
+    } catch (error) {
+      console.warn('open failed', error);
+      warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
+    }
+  }
   document.body.addEventListener('change', async (event) => {
     const input = event.target.closest('[data-slot-file]');
     if (!input || !input.files[0]) return;
     const slot = input.dataset.slotFile;
     const file = input.files[0];
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const image = await loadImage(new Blob([bytes], { type: file.type || 'image/png' }));
-    if (slot === 'albedo') {
-      useImage(image, file, bytes);
-      return;
-    }
-    remember();
-    slotImages[slot] = image;
-    document.querySelector('[data-file-name="' + slot + '"]').textContent = input.files[0].name;
-    document.querySelector('[data-slot-mode="' + slot + '"]').value = 'load';
-    if (!state.original) {
-      state.original = image;
-      setNameFrom(input.files[0]);
-    }
-    commit();
-    schedule();
+    await openTracked(file, async () => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const image = await loadImage(new Blob([bytes], { type: file.type || 'image/png' }));
+      if (slot === 'albedo') {
+        useImage(image, file, bytes);
+        return;
+      }
+      remember();
+      slotImages[slot] = image;
+      document.querySelector('[data-file-name="' + slot + '"]').textContent = file.name;
+      document.querySelector('[data-slot-mode="' + slot + '"]').value = 'load';
+      if (!state.original) {
+        state.original = image;
+        setNameFrom(file);
+      }
+      commit();
+      schedule();
+    });
   });
   document.getElementById('mask-file').addEventListener('change', async (event) => {
-    remember();
-    event.target._image = event.target.files[0] ? await loadImage(event.target.files[0]) : null;
-    commit();
-    schedule();
+    const file = event.target.files[0];
+    if (!file) {
+      remember();
+      event.target._image = null;
+      commit();
+      schedule();
+      return;
+    }
+    await openTracked(file, async () => {
+      remember();
+      event.target._image = await loadImage(file);
+      commit();
+      schedule();
+    });
   });
   document.getElementById('orm-file').addEventListener('change', async (event) => {
     const file = event.target.files[0];
     if (!file) return;
-    remember();
-    const image = await loadImage(file);
-    const order = document.getElementById('orm-order').value;
-    const map = order === 'arm'
-      ? { roughness: 'r', metallic: 'g', ao: 'b' }
-      : { ao: 'r', roughness: 'g', metallic: 'b' };
-    Object.keys(map).forEach((slot) => {
-      slotImages[slot] = extract(image, map[slot], false);
-      document.querySelector('[data-slot-mode="' + slot + '"]').value = 'load';
-      document.querySelector('[data-slot-channel="' + slot + '"]').value = 'r';
+    await openTracked(file, async () => {
+      remember();
+      const image = await loadImage(file);
+      const order = document.getElementById('orm-order').value;
+      const map = order === 'arm'
+        ? { roughness: 'r', metallic: 'g', ao: 'b' }
+        : { ao: 'r', roughness: 'g', metallic: 'b' };
+      Object.keys(map).forEach((slot) => {
+        slotImages[slot] = extract(image, map[slot], false);
+        document.querySelector('[data-slot-mode="' + slot + '"]').value = 'load';
+        document.querySelector('[data-slot-channel="' + slot + '"]').value = 'r';
+      });
+      if (!state.original) state.original = image;
+      commit();
+      schedule();
     });
-    if (!state.original) state.original = image;
-    commit();
-    schedule();
   });
 }

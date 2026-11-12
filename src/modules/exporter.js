@@ -2,6 +2,7 @@ import { downloadBytes, materialDocument, materialName, terrainDocument, terrain
 import { activeLayer, layerPhoto, otherLayer, switchLayer, withLayer } from './layers.js';
 import { atOutputSize, engine, renderForExport } from './render.js';
 import { text } from '../services/i18n.js';
+import { hideProgress, showProgress } from '../services/progress.js';
 import { readParams, state } from '../services/state.js';
 import { run } from '../services/worker.js';
 import { terrainValues } from '../utils/terrain.js';
@@ -61,7 +62,7 @@ function materialJson(params, name) {
   }), null, 2);
 }
 
-export async function filesForCurrent(subfolder, n = 1) {
+export async function filesForCurrent(subfolder, n = 1, onStep) {
   const params = readParams();
   const name = exportName(params, n);
   const prefix = subfolder ? subfolder + '/' : '';
@@ -69,11 +70,17 @@ export async function filesForCurrent(subfolder, n = 1) {
     const back = activeLayer();
     if (!state.original && layerPhoto(otherLayer())) switchLayer(otherLayer(), { hold: false, render: false });
     const files = {};
+    const groups = terrainFiles(name);
+    let done = 0;
+    const total = groups.length * 2;
+    const tick = () => { done++; if (onStep) onStep(done, total); };
+    if (onStep) onStep(0, total);
     const readLayer = async (which) => {
       const made = {};
-      for (const { group, detail, macro } of terrainFiles(name)) {
+      for (const { group, detail, macro } of groups) {
         const fileName = which === 'detail' ? detail : macro;
         made[fileName] = await encode(TERRAIN_READS[group][which === 'detail' ? 0 : 1]());
+        tick();
       }
       return made;
     };
@@ -117,8 +124,13 @@ export async function filesForCurrent(subfolder, n = 1) {
   ];
   if (wantsOpacity(params)) names.push(['opacity', name + '_o.dataR.png']);
   const files = [];
+  if (onStep) onStep(0, names.length);
   const size = await atOutputSize(async (at) => {
-    for (const [key, fileName] of names) files.push({ name: prefix + fileName, data: await mapPng(key, fileName) });
+    for (let i = 0; i < names.length; i++) {
+      const [key, fileName] = names[i];
+      files.push({ name: prefix + fileName, data: await mapPng(key, fileName) });
+      if (onStep) onStep(i + 1, names.length);
+    }
     return at;
   });
   files.push({ name: prefix + 'main.materials.json', data: new TextEncoder().encode(materialJson(params, name)) });
@@ -156,9 +168,13 @@ export function init() {
     const button = event.target.closest('[data-save]');
     if (!button || !state.original) return;
     const [key, suffix] = SAVE[button.dataset.save];
+    const fileName = exportName(readParams()) + suffix;
+    showProgress(0.15, text('ui.materialWizard.progress.saving', { name: text('ui.materialWizard.slots.' + button.dataset.save) }), true);
     const bytes = await atOutputSize(() => mapPng(key, suffix)).catch(() => null);
-    if (!bytes) return;
-    downloadBytes(bytes, exportName(readParams()) + suffix, 'image/png');
+    if (!bytes) { hideProgress(0); return; }
+    downloadBytes(bytes, fileName, 'image/png');
+    showProgress(1, text('ui.materialWizard.save.saved', { name: fileName }), false);
+    hideProgress(1600);
   });
 
   document.body.addEventListener('input', (event) => {
@@ -180,7 +196,19 @@ export function init() {
 
   document.getElementById('download').addEventListener('click', async () => {
     if (!state.original) return;
-    const files = await filesForCurrent('');
-    downloadBytes(await run('zip', { files }, { transfer: files.map((file) => file.data.buffer) }), exportName(readParams()) + '.zip', 'application/zip');
+    const name = exportName(readParams()) + '.zip';
+    try {
+      showProgress(0, text('ui.materialWizard.progress.exporting', { n: 0, total: 1 }), true);
+      const files = await filesForCurrent('', 1, (done, total) => {
+        showProgress(0.85 * done / Math.max(1, total), text('ui.materialWizard.progress.exporting', { n: done, total }), false);
+      });
+      showProgress(0.9, text('ui.materialWizard.progress.packing'), true);
+      downloadBytes(await run('zip', { files }, { transfer: files.map((file) => file.data.buffer) }), name, 'application/zip');
+      showProgress(1, text('ui.materialWizard.progress.exported', { name }), false);
+      hideProgress(1600);
+    } catch (error) {
+      console.warn('export failed', error);
+      hideProgress(0);
+    }
   });
 }

@@ -7,7 +7,7 @@ for (let n = 0; n < 256; n++) {
   CRC_TABLE[n] = c >>> 0;
 }
 
-function crc32(buf) {
+export function crc32(buf) {
   let c = 0xffffffff;
   for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 255] ^ (c >>> 8);
   return (~c) >>> 0;
@@ -140,7 +140,25 @@ export async function readProject(bytes) {
       if (layer.mask && !files[dir + 'mask.png']) throw new Error('missing mask');
     }
   }
-  return { session, files, photo };
+  const history = goodHistory(session.history, files) ? session.history : null;
+  return { session, files, photo, history, historyDropped: !!session.history && !history };
+}
+
+function goodStep(step, files) {
+  if (!step || typeof step !== 'object') return false;
+  const has = (name) => name == null || (typeof name === 'string' && !!files[name]);
+  if (!has(step.photo) || !has(step.mask)) return false;
+  if (step.slots && (typeof step.slots !== 'object' || !Object.values(step.slots).every(has))) return false;
+  return !step.lights || (Array.isArray(step.lights) && step.lights.every((light) => light && has(light.image)));
+}
+
+// Undo history: steps oldest first, images referenced by entry name. A bad one is dropped, the project still opens.
+function goodHistory(history, files) {
+  if (!history || history.v !== 1) return false;
+  const stack = (list) => list == null || (Array.isArray(list) && list.every((step) => goodStep(step, files)));
+  const pair = (h) => !!h && stack(h.undo) && stack(h.redo);
+  if (!pair(history)) return false;
+  return !history.layers || Object.keys(history.layers).every((which) => (which === 'detail' || which === 'macro') && pair(history.layers[which]));
 }
 
 // Encodes without copying the pixels. Works in the page and in a worker.

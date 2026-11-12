@@ -37,6 +37,7 @@ const SHELL = [
   'src/services/history.js',
   'src/services/i18n.js',
   'src/services/presets.js',
+  'src/services/progress.js',
   'src/services/state.js',
   'src/shaders/albedo.glsl.js',
   'src/shaders/basic.glsl.js',

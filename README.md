@@ -49,7 +49,8 @@ Switch the material to Terrain on the first tab to make a TerrainMaterial instea
 - Export Maps saves a zip with the PNGs and `main.materials.json` (level, road and vehicle profiles; roads also get `textureLength.txt`). Output size can differ from the preview size, up to 8192.
 - Single maps can be saved on their own, and the material JSON can be copied to the clipboard.
 - A name prefix and numbering pattern cover batches of photos.
-- Projects (`.mwz`) keep the photo, loaded maps and every setting, and open again exactly as they were saved.
+- Projects (`.mwz`) keep the photo, loaded maps, every setting, the open view and tab, and the whole undo history of both terrain layers, so Undo still steps back after reopening. History has no step limit. File > Clear Undo History makes the file smaller.
+- Save writes back to the open file where the browser allows it (Chrome and Edge), and Save As picks a new one. Other browsers and phones download the project, so Save As is hidden there. A bar shows the save progress, and the phone's save button saves the project.
 - Presets save groups of settings and can be exported and imported.
 - The page installs as an app, works offline, and opens `.mwz` files.
 

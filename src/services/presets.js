@@ -5,6 +5,7 @@ import { syncSlot } from '../modules/slots.js';
 import { syncZones } from '../modules/zones.js';
 import { commit, remember } from './history.js';
 import { text } from './i18n.js';
+import { hideProgress, showProgress } from './progress.js';
 import { SLOTS, syncResets, warningsEl, state } from './state.js';
 
 const PRESET_KEY = 'mw-presets';
@@ -154,6 +155,7 @@ export function init() {
     const file = presetFile.files[0];
     presetFile.value = '';
     if (!file) return;
+    showProgress(0.3, text('ui.materialWizard.progress.opening', { name: file.name }), true);
     let incoming = null;
     try {
       const parsed = JSON.parse(await file.text());
@@ -161,11 +163,14 @@ export function init() {
       if (versionNewer(parsed.version)) state.sessionNote = text('ui.materialWizard.notes.newerFile', { v: parsed.version });
     } catch (e) { /* not a preset file */ }
     if (!incoming || typeof incoming !== 'object') {
+      hideProgress(0);
       warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
       return;
     }
     const presets = Object.assign(storedPresets(), incoming);
     try { localStorage.setItem(PRESET_KEY, JSON.stringify(presets)); } catch (e) { /* ignore */ }
     fillPresetList(Object.keys(incoming)[0]);
+    showProgress(1, text('ui.materialWizard.progress.opened', { name: file.name }), false);
+    hideProgress(1600);
   });
 }

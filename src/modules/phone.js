@@ -1,4 +1,4 @@
-import { pickAndOpen } from './project.js';
+import { pickAndOpen, saveProject } from './project.js';
 import { showView, viewSelect } from './view.js';
 import { redo, undo } from '../services/history.js';
 import { state } from '../services/state.js';
@@ -55,6 +55,41 @@ function endSwipe(animate) {
   if (animate) setTimeout(() => aside.querySelectorAll('.mw-swipe-back').forEach((el) => el.classList.remove('mw-swipe-back')), 260);
 }
 
+// The raised app bar: labels under the commands and the view sheet above it.
+
+const viewbar = document.querySelector('.mw-viewbar');
+
+let barFrom = null;
+
+let barDragged = false;
+
+let closing = 0;
+
+function measureBars() {
+  const body = document.body;
+  body.style.setProperty('--mw-appbar-h', innerHeight - appbar.getBoundingClientRect().top + 'px');
+  body.style.setProperty('--mw-sheet-h', (body.classList.contains('mw-more-open') ? viewbar.offsetHeight : 0) + 'px');
+}
+
+export function setMore(open) {
+  const body = document.body;
+  if (open === body.classList.contains('mw-more-open') && !closing) return;
+  clearTimeout(closing);
+  closing = 0;
+  body.classList.remove('mw-more-closing');
+  if (open) {
+    body.classList.add('mw-more-open');
+    measureBars();
+    return;
+  }
+  body.classList.add('mw-more-closing');
+  closing = setTimeout(() => {
+    closing = 0;
+    body.classList.remove('mw-more-open', 'mw-more-closing');
+    measureBars();
+  }, reducedMotion.matches ? 0 : 160);
+}
+
 export function init() {
   appbar.addEventListener('click', (event) => {
     const button = event.target.closest('[data-app]');
@@ -63,22 +98,37 @@ export function init() {
     if (action === 'open') pickAndOpen();
     else if (action === 'undo') undo();
     else if (action === 'redo') redo();
-    else if (action === 'download') document.getElementById('download').click();
-    else if (action === 'more') {
-      const body = document.body;
-      if (body.classList.contains('mw-more-closing')) return;
-      if (body.classList.contains('mw-more-open')) {
-        body.classList.add('mw-more-closing');
-        setTimeout(() => {
-          body.classList.remove('mw-more-open', 'mw-more-closing');
-          body.style.setProperty('--mw-appbar-h', appbar.offsetHeight + 'px');
-        }, 160);
-      } else {
-        body.classList.add('mw-more-open');
-        body.style.setProperty('--mw-appbar-h', appbar.offsetHeight + 'px');
-      }
-    }
+    else if (action === 'save') saveProject(false);
+    else if (action === 'more') setMore(!document.body.classList.contains('mw-more-open'));
   });
+  new ResizeObserver(measureBars).observe(appbar);
+  new ResizeObserver(measureBars).observe(viewbar);
+
+  appbar.addEventListener('pointerdown', (event) => {
+    barDragged = false;
+    barFrom = event.isPrimary ? { x: event.clientX, y: event.clientY, vertical: null } : null;
+  });
+  appbar.addEventListener('pointermove', (event) => {
+    if (!barFrom) return;
+    const dx = event.clientX - barFrom.x;
+    const dy = event.clientY - barFrom.y;
+    if (barFrom.vertical === null) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      barFrom.vertical = Math.abs(dy) > Math.abs(dx) * 1.5;
+      if (!barFrom.vertical) { barFrom = null; return; }
+    }
+    if (Math.abs(dy) < 24) return;
+    barDragged = true;
+    barFrom = null;
+    setMore(dy < 0);
+  });
+  ['pointerup', 'pointercancel'].forEach((type) => appbar.addEventListener(type, () => { barFrom = null; }));
+  appbar.addEventListener('click', (event) => {
+    if (!barDragged) return;
+    barDragged = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
   compareButton.addEventListener('pointerdown', () => {
     if (compareView || !state.original) return;
     compareView = viewSelect.value;

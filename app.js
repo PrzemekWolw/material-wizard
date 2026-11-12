@@ -19,6 +19,7 @@ import { init as initPick } from './src/modules/pick.js';
 import { syncNamePreview, init as initExporter } from './src/modules/exporter.js';
 import { init as initBatch } from './src/modules/batch.js';
 import { init as initTooltip } from './src/modules/tooltip.js';
+import { finishStartup } from './src/services/progress.js';
 
 function refreshLanguage() {
   document.querySelectorAll('[data-file-name]').forEach((el) => {
@@ -62,3 +63,4 @@ captureStart();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((error) => console.warn('service worker failed', error));
 
 engine.resize(1024, 1024);
+finishStartup();

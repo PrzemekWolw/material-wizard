@@ -76,6 +76,34 @@ test('a stored zip still opens', async () => {
   assert.deepEqual(project.files['photo.png'], files[1].data);
 });
 
+function withHistory(history, extra = []) {
+  const files = projectFiles();
+  const session = JSON.parse(new TextDecoder().decode(files[0].data));
+  files[0].data = new TextEncoder().encode(JSON.stringify({ ...session, history }));
+  return files.concat(extra);
+}
+
+test('undo history is kept when every step points at a stored entry', async () => {
+  const step = { photo: 'history/img/0.png', slots: { albedo: 'history/img/0.png', height: 'photo.png' }, lights: [], mask: null, values: { 'p:delight': '1' } };
+  const history = { v: 1, undo: [step], redo: [], layers: { macro: { undo: [step], redo: [] } } };
+  const project = await readProject(await zipStore(withHistory(history, [{ name: 'history/img/0.png', data: new Uint8Array([1, 2, 3]) }])));
+  assert.equal(project.historyDropped, false);
+  assert.equal(project.history.undo[0].values['p:delight'], '1');
+});
+
+test('a broken undo history is dropped, the project still opens', async () => {
+  const missing = { v: 1, undo: [{ photo: 'history/img/9.png', slots: {}, lights: [] }], redo: [] };
+  const project = await readProject(await zipStore(withHistory(missing)));
+  assert.equal(project.history, null);
+  assert.equal(project.historyDropped, true);
+  assert.equal(project.photo, 'photo.png');
+  const wrongLayer = await readProject(await zipStore(withHistory({ v: 1, undo: [], redo: [], layers: { other: { undo: [], redo: [] } } })));
+  assert.equal(wrongLayer.historyDropped, true);
+  const none = await readProject(await zipStore(projectFiles()));
+  assert.equal(none.history, null);
+  assert.equal(none.historyDropped, false);
+});
+
 test('a flipped byte and a short file are rejected', async () => {
   const bytes = await zipStore(projectFiles());
   const flipped = bytes.slice();

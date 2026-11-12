@@ -121,3 +121,46 @@
 }
 
 .mw-badge.is-good { background: var(--accent); color: #fff; }
+
+/* Startup, open and save, after the Windows Phone 8.1 system tray indicator: a hairline bar and one line of text. */
+.mw-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  background: var(--surface);
+  pointer-events: none;
+}
+.mw-progress[hidden] { display: none; }
+.mw-progress-track { position: relative; height: 4px; overflow: hidden; background: var(--mw-track); }
+.mw-progress-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform: scaleX(var(--mw-save, 0));
+  transform-origin: left;
+  transition: transform 0.1s linear, opacity 0.1s linear;
+}
+.mw-progress.is-busy .mw-progress-fill { opacity: 0.35; }
+.mw-progress-dots { display: none; position: absolute; inset: 0; }
+.mw-progress.is-busy .mw-progress-dots { display: block; }
+.mw-progress-dots i { position: absolute; inset: 0; animation: mw-dot 2s infinite both; }
+.mw-progress-dots i::before { content: ""; position: absolute; top: 0; left: -4px; width: 4px; height: 4px; background: var(--accent); }
+.mw-progress-dots i:nth-child(2) { animation-delay: 0.18s; }
+.mw-progress-dots i:nth-child(3) { animation-delay: 0.36s; }
+.mw-progress-dots i:nth-child(4) { animation-delay: 0.54s; }
+.mw-progress-dots i:nth-child(5) { animation-delay: 0.72s; }
+.mw-progress-text {
+  margin: 0;
+  padding: 4px 8px 6px;
+  color: var(--mute);
+  font-size: 13px;
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mw-progress-text.mw-pop { animation: mw-pop 0.167s cubic-bezier(0, 2, 0, 2) both; }
+.mw-progress.is-leaving { animation: mw-status-out 0.25s cubic-bezier(0.3825, 0.0025, 0.8775, -0.1075) both; }

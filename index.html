@@ -92,6 +92,7 @@
   <link rel="modulepreload" href="./src/modules/layout.js">
   <link rel="modulepreload" href="./src/modules/slots.js">
   <link rel="modulepreload" href="./src/services/presets.js">
+  <link rel="modulepreload" href="./src/services/progress.js">
   <link rel="modulepreload" href="./src/modules/project.js">
   <link rel="modulepreload" href="./src/modules/phone.js">
   <link rel="modulepreload" href="./src/services/history.js">
@@ -134,6 +135,7 @@
       <button type="button" class="mw-item" role="menuitem" data-file-action="open"><span data-copy="ui.materialWizard.menu.open"></span><kbd>Ctrl+O</kbd></button>
       <button type="button" class="mw-item" role="menuitem" data-file-action="save"><span data-copy="ui.materialWizard.menu.save"></span><kbd>Ctrl+S</kbd></button>
       <button type="button" class="mw-item" role="menuitem" data-file-action="saveAs"><span data-copy="ui.materialWizard.menu.saveAs"></span><kbd>Ctrl+Shift+S</kbd></button>
+      <button type="button" class="mw-item" role="menuitem" data-file-action="clearHistory" data-title="ui.materialWizard.menu.clearHistoryTip"><span data-copy="ui.materialWizard.menu.clearHistory"></span></button>
       <hr>
       <button type="button" class="mw-item" role="menuitem" data-file-action="export"><span data-copy="ui.materialWizard.menu.export"></span><kbd>Ctrl+E</kbd></button>
       <hr data-install hidden>
@@ -155,6 +157,10 @@
       <input type="file" id="preset-file" accept=".json,application/json" class="mw-hidden">
     </div>
     <div class="mw-stage">
+      <div class="mw-progress is-busy" id="save-status" role="status" aria-live="polite">
+        <div class="mw-progress-track"><span class="mw-progress-fill"></span><span class="mw-progress-dots"><i></i><i></i><i></i><i></i><i></i></span></div>
+        <p class="mw-progress-text" data-copy="ui.materialWizard.progress.loading">loading…</p>
+      </div>
       <div class="mw-tile-bar" id="tile-bar" hidden>
         <div class="mw-seg">
           <button type="button" data-tile-view="frame" data-copy="ui.materialWizard.tile.viewFrame"></button>
@@ -701,11 +707,13 @@
     </aside>
   </div>
   <nav class="mw-appbar" id="appbar">
+    <div class="mw-appbar-cmds">
     <button type="button" data-app="open"><span class="mw-round"><i class="fa-regular fa-folder-open"></i></span><span data-copy="ui.materialWizard.app.open"></span></button>
     <button type="button" data-app="undo" disabled><span class="mw-round"><i class="fa-solid fa-rotate-left"></i></span><span data-copy="ui.materialWizard.undo"></span></button>
     <button type="button" data-app="redo" disabled><span class="mw-round"><i class="fa-solid fa-rotate-right"></i></span><span data-copy="ui.materialWizard.redo"></span></button>
     <button type="button" data-app="compare"><span class="mw-round"><i class="fa-solid fa-circle-half-stroke"></i></span><span data-copy="ui.materialWizard.app.compare"></span></button>
-    <button type="button" data-app="download"><span class="mw-round"><i class="fa-solid fa-download"></i></span><span data-copy="ui.materialWizard.app.download"></span></button>
+    <button type="button" data-app="save" aria-busy="false"><span class="mw-round"><i class="fa-regular fa-floppy-disk"></i></span><span data-copy="ui.materialWizard.app.save"></span></button>
+    </div>
     <button type="button" class="mw-appbar-more" data-app="more" data-title="ui.materialWizard.app.more">&bull;&bull;&bull;</button>
   </nav>
   <script type="module" src="./app.js"></script>

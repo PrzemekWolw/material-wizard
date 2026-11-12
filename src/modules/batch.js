@@ -2,6 +2,7 @@ import { downloadBytes } from '../export.js';
 import { run } from '../services/worker.js';
 import { filesForCurrent } from './exporter.js';
 import { text } from '../services/i18n.js';
+import { hideProgress, showProgress } from '../services/progress.js';
 import { SLOTS, slotImages, state } from '../services/state.js';
 import { loadImage } from '../utils/images.js';
 
@@ -49,6 +50,7 @@ async function runGroups(files, writer) {
   list.innerHTML = '';
   const all = [];
   for (const [index, group] of groups.entries()) {
+    showProgress(index / groups.length, text('ui.materialWizard.progress.batch', { n: index + 1, total: groups.length, name: group.base }), true);
     const li = document.createElement('li');
     li.textContent = text('ui.materialWizard.notes.batchWork', { name: group.base });
     list.appendChild(li);
@@ -75,7 +77,10 @@ async function runGroups(files, writer) {
           document.querySelector('[data-slot-mode="' + slot + '"]').value = 'load';
         }
       }
-      const produced = await filesForCurrent(group.base, index + 1);
+      const produced = await filesForCurrent(group.base, index + 1, (done, total) => {
+        const span = 1 / groups.length;
+        showProgress((index + done / Math.max(1, total)) * span, text('ui.materialWizard.progress.batch', { n: index + 1, total: groups.length, name: group.base }), false);
+      });
       if (writer) await writer(group.base, produced);
       else all.push(...produced);
       li.textContent = text('ui.materialWizard.notes.batchDone', { name: group.base });
@@ -100,8 +105,17 @@ export function init() {
   document.getElementById('run-batch').addEventListener('click', async () => {
     const input = document.getElementById('batch-folder');
     if (!input.files.length) return;
-    const all = await runGroups(input.files, null);
-    if (all.length) downloadBytes(await run('zip', { files: all }, { transfer: all.map((file) => file.data.buffer) }), 'material-wizard-batch.zip', 'application/zip');
+    try {
+      const all = await runGroups(input.files, null);
+      if (!all.length) { hideProgress(0); return; }
+      showProgress(0.92, text('ui.materialWizard.progress.packing'), true);
+      downloadBytes(await run('zip', { files: all }, { transfer: all.map((file) => file.data.buffer) }), 'material-wizard-batch.zip', 'application/zip');
+      showProgress(1, text('ui.materialWizard.progress.exported', { name: 'material-wizard-batch.zip' }), false);
+      hideProgress(1600);
+    } catch (error) {
+      console.warn('batch failed', error);
+      hideProgress(0);
+    }
   });
 
   document.getElementById('write-folder').addEventListener('click', async () => {
@@ -110,16 +124,28 @@ export function init() {
       document.getElementById('run-batch').click();
       return;
     }
-    const dir = await window.showDirectoryPicker();
-    await runGroups(input.files, async (name, produced) => {
-      const sub = await dir.getDirectoryHandle(name, { create: true });
-      for (const file of produced) {
-        const leaf = file.name.split('/').pop();
-        const handle = await sub.getFileHandle(leaf, { create: true });
-        const stream = await handle.createWritable();
-        await stream.write(file.data);
-        await stream.close();
-      }
-    });
+    let dir;
+    try { dir = await window.showDirectoryPicker(); }
+    catch (error) {
+      if (error.name !== 'AbortError') console.warn('batch folder failed', error);
+      return;
+    }
+    try {
+      await runGroups(input.files, async (name, produced) => {
+        const sub = await dir.getDirectoryHandle(name, { create: true });
+        for (const file of produced) {
+          const leaf = file.name.split('/').pop();
+          const handle = await sub.getFileHandle(leaf, { create: true });
+          const stream = await handle.createWritable();
+          await stream.write(file.data);
+          await stream.close();
+        }
+      });
+      showProgress(1, text('ui.materialWizard.save.saved', { name: dir.name || 'folder' }), false);
+      hideProgress(1600);
+    } catch (error) {
+      console.warn('batch folder failed', error);
+      hideProgress(0);
+    }
   });
 }

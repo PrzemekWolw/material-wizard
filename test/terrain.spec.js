@@ -203,5 +203,9 @@ test('detail and macro keep their own photo and settings, and both survive a pro
   await layer(page, 'macro');
   expect(await num(page, 'heightContrast')).toBeCloseTo(0.4);
   await expect(page.locator('[data-file-name="albedo"]')).toHaveText('cloud.png');
+  expect(project.session.history.layers.macro.undo.length).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.getElementById('undo').disabled)).toBe(false);
+  await page.evaluate(() => document.getElementById('undo').click());
+  await expect(page.locator('[data-file-name="albedo"]')).toHaveText('Choose image');
   expect(errors).toEqual([]);
 });

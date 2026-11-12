@@ -2,6 +2,7 @@ import { schedule } from './render.js';
 import { presentSoon } from './view.js';
 import { commit, remember } from '../services/history.js';
 import { text } from '../services/i18n.js';
+import { trackOpen } from '../services/progress.js';
 import { run } from '../services/worker.js';
 import { slotImages, warningsEl, state } from '../services/state.js';
 import { canvasFromRGBA, imageDataOf, loadImage } from '../utils/images.js';
@@ -168,11 +169,18 @@ export function init() {
     const file = event.target.files[0];
     event.target.value = '';
     if (!file) return;
-    remember();
-    const image = await loadImage(file);
-    state.lights.push({ image, az: state.lights.length * 90, el: 45 });
-    commit();
-    drawLights();
+    try {
+      await trackOpen(file, async () => {
+        remember();
+        const image = await loadImage(file);
+        state.lights.push({ image, az: state.lights.length * 90, el: 45 });
+        commit();
+        drawLights();
+      });
+    } catch (error) {
+      console.warn('open failed', error);
+      warningsEl.textContent = text('ui.materialWizard.notes.badFile', { name: file.name });
+    }
   });
 
   document.getElementById('solve-lights').addEventListener('click', async () => {

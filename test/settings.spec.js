@@ -151,6 +151,101 @@ test('settings, version, corrupt open and failed save', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('startup hides the loading bar, and opening a file shows it', async ({ page }) => {
+  await gotoApp(page);
+  await expect(page.locator('#save-status')).toBeHidden();
+  await openPng(page);
+  await expect(page.locator('#save-status .mw-progress-text')).toHaveText('opened sample.png');
+  await page.locator('#download').evaluate((el) => el.click());
+  await expect(page.locator('#save-status .mw-progress-text')).toHaveText(/^exported .+\.zip$/, { timeout: 20000 });
+  await expect(page.locator('#save-status')).toBeHidden({ timeout: 5000 });
+});
+
+test('Save As is hidden without the file picker', async ({ page }) => {
+  await page.addInitScript(() => { delete window.showSaveFilePicker; });
+  await gotoApp(page);
+  expect(await page.locator('[data-file-action="saveAs"]').evaluate((el) => el.hidden)).toBe(true);
+  expect(await page.locator('[data-file-action="save"]').evaluate((el) => el.hidden)).toBe(false);
+});
+
+test('a failed write says so, and Save writes back to the chosen file', async ({ page }) => {
+  await gotoApp(page);
+  expect(await page.locator('[data-file-action="saveAs"]').evaluate((el) => el.hidden)).toBe(false);
+  await openPng(page);
+  await page.evaluate(() => {
+    window.pickerCalls = 0;
+    window.written = 0;
+    window.writes = 0;
+    window.failWrite = true;
+    window.showSaveFilePicker = async () => {
+      window.pickerCalls++;
+      return {
+        name: 'picked.mwz',
+        async createWritable() {
+          if (window.failWrite) throw new DOMException('read-only', 'NotAllowedError');
+          return { async write(bytes) { window.written = bytes.length; window.writes++; }, async close() {} };
+        },
+      };
+    };
+  });
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => document.querySelector('#warnings').textContent.includes('could not be written'));
+  expect(await page.evaluate(() => window.pickerCalls)).toBe(1);
+  await page.evaluate(() => { window.failWrite = false; });
+  await page.keyboard.press('Control+s');
+  await expect(page.locator('#save-status .mw-progress-text')).toHaveText('saved picked.mwz');
+  expect(await page.evaluate(() => window.written)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.pickerCalls)).toBe(2);
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => window.writes === 2);
+  expect(await page.evaluate(() => window.pickerCalls)).toBe(2);
+  await page.keyboard.press('Control+Shift+s');
+  await page.waitForFunction(() => window.pickerCalls === 3 && window.writes === 3);
+});
+
+test('a save that leaves an empty file is dropped', async ({ page }) => {
+  await gotoApp(page);
+  await openPng(page);
+  await page.evaluate(() => {
+    window.removed = 0;
+    window.showSaveFilePicker = async () => ({
+      name: 'empty.mwz',
+      async getFile() { return { size: 0, name: 'empty.mwz' }; },
+      async remove() { window.removed++; },
+      async createWritable() {
+        return { async write() {}, async close() {}, async abort() {} };
+      },
+    });
+  });
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => document.querySelector('#warnings').textContent.includes('could not be written'));
+  expect(await page.evaluate(() => window.removed)).toBeGreaterThan(0);
+  await expect(page.locator('#save-status')).toBeHidden();
+  expect(await page.evaluate(async () => (await import('./src/services/state.js')).state.projectHandle)).toBe(null);
+
+  await page.evaluate(() => {
+    window.removed = 0;
+    window.showSaveFilePicker = async () => {
+      let size = 0;
+      return {
+        name: 'kept.mwz',
+        async getFile() { return { size, name: 'kept.mwz' }; },
+        async remove() { window.removed++; },
+        async createWritable() {
+          return {
+            async write(bytes) { size = bytes.byteLength; },
+            async close() {},
+            async abort() { size = 0; },
+          };
+        },
+      };
+    };
+  });
+  await page.keyboard.press('Control+s');
+  await expect(page.locator('#save-status .mw-progress-text')).toHaveText('saved kept.mwz');
+  expect(await page.evaluate(() => window.removed)).toBe(0);
+});
+
 async function openFlat(page, color) {
   const png = await page.evaluate((fill) => {
     const c = document.createElement('canvas');

@@ -21,18 +21,32 @@
 
   .mw-viewbar { display: none; }
   .mw-viewbar #undo, .mw-viewbar #redo { display: none; }
+  /* The raised app bar's sheet: two columns, every name above its control. */
   body.mw-more-open .mw-viewbar {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 16px;
+    align-items: end;
     position: fixed;
     left: 0;
     right: 0;
     bottom: var(--mw-appbar-h, 72px);
     z-index: 6;
-    padding: 12px;
+    max-height: 55dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    padding: 16px 16px 14px;
     background: var(--surface);
     border-top: 1px solid var(--line);
     animation: mw-bar-in 0.3s var(--ease) both;
   }
+  body.mw-more-open .mw-viewbar > * { min-width: 0; }
+  .mw-viewbar .mw-field { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; font-size: 13px; color: var(--mute); }
+  .mw-viewbar .mw-field > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mw-viewbar .mw-field > select { grid-column: 1 / -1; width: 100%; }
+  .mw-viewbar .mw-check { grid-column: 1 / -1; min-height: 32px; }
+  body.mw-more-open .mw-progress { bottom: calc(var(--mw-appbar-h, 72px) + var(--mw-sheet-h, 0px)); }
   body.mw-more-closing .mw-viewbar { animation: mw-bar-out 0.16s cubic-bezier(0.7, 0, 1, 0.5) both; }
 
   .mw-page > aside { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
@@ -41,20 +55,36 @@
   .mw-panel:not(.mw-hidden) { flex: 1 1 0; min-height: 0; overflow-y: auto; padding-bottom: 16px; touch-action: pan-y; scrollbar-width: none; }
   .mw-panel h2 { display: none; }
 
+  /* WP8.1 app bar: round commands that scroll sideways when they do not fit, "..." pinned on the right.
+     Swiping up raises it (labels and the view sheet), swiping down lowers it. */
   .mw-appbar {
     flex: none;
     display: flex;
-    justify-content: center;
     align-items: flex-start;
-    gap: 18px;
     position: relative;
-    padding: 8px 44px 6px;
+    padding: 8px 0 6px;
     background: var(--surface);
     border-top: 1px solid var(--line);
     z-index: 7;
+    touch-action: pan-x;
     animation: mw-bar-in 0.4s var(--ease) 0.15s both;
   }
+  .mw-appbar-cmds {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 0 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .mw-appbar-cmds::-webkit-scrollbar { display: none; }
+  .mw-appbar-cmds > :first-child { margin-left: auto; }
+  .mw-appbar-cmds > :last-child { margin-right: auto; }
   .mw-appbar button {
+    flex: none;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -67,17 +97,31 @@
     padding: 0;
     cursor: pointer;
   }
+  .mw-appbar-cmds button { width: 64px; }
   .mw-appbar button:disabled { opacity: 0.4; }
   .mw-appbar .mw-round { width: 40px; height: 40px; border: 2px solid var(--text); transition: transform 0.15s var(--ease), background 0.1s ease, color 0.1s ease; }
   .mw-appbar button:active .mw-round { background: var(--text); color: var(--bg); transform: scale(0.9); }
-  .mw-appbar button > span:last-child { display: none; }
-  body.mw-more-open .mw-appbar button > span:last-child { display: block; animation: mw-label-in 0.25s var(--ease) both; }
-  body.mw-more-open .mw-appbar button:nth-child(2) > span:last-child { animation-delay: 30ms; }
-  body.mw-more-open .mw-appbar button:nth-child(3) > span:last-child { animation-delay: 60ms; }
-  body.mw-more-open .mw-appbar button:nth-child(4) > span:last-child { animation-delay: 90ms; }
-  body.mw-more-open .mw-appbar button:nth-child(5) > span:last-child { animation-delay: 120ms; }
-  body.mw-more-closing .mw-appbar button > span:last-child { animation: mw-label-out 0.16s cubic-bezier(0.7, 0, 1, 0.5) both; }
-  .mw-appbar .mw-appbar-more { position: absolute; right: 12px; top: 6px; letter-spacing: 2px; font-size: 16px; }
+  .mw-appbar-cmds button > span:last-child { display: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: lowercase; }
+  body.mw-more-open .mw-appbar-cmds button > span:last-child { display: block; animation: mw-label-in 0.25s var(--ease) both; }
+  body.mw-more-open .mw-appbar-cmds button:nth-child(2) > span:last-child { animation-delay: 30ms; }
+  body.mw-more-open .mw-appbar-cmds button:nth-child(3) > span:last-child { animation-delay: 60ms; }
+  body.mw-more-open .mw-appbar-cmds button:nth-child(4) > span:last-child { animation-delay: 90ms; }
+  body.mw-more-open .mw-appbar-cmds button:nth-child(5) > span:last-child { animation-delay: 120ms; }
+  body.mw-more-closing .mw-appbar-cmds button > span:last-child { animation: mw-label-out 0.16s cubic-bezier(0.7, 0, 1, 0.5) both; }
+  .mw-progress { position: fixed; top: auto; bottom: var(--mw-appbar-h, 72px); z-index: 8; border-top: 1px solid var(--line); }
+  .mw-progress-text { padding: 6px 12px 8px; }
+  .mw-appbar [data-app="save"] .mw-round { position: relative; }
+  .mw-appbar [data-app="save"][aria-busy="true"] .mw-round { border-color: var(--mw-track); }
+  .mw-appbar [data-app="save"][aria-busy="true"] .mw-round::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+    background: conic-gradient(var(--accent) calc(var(--mw-save, 0) * 1turn), transparent 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  }
+  .mw-appbar .mw-appbar-more { flex: none; align-self: stretch; justify-content: flex-start; width: 44px; margin-top: -8px; padding-top: 4px; letter-spacing: 2px; font-size: 16px; }
 }
 
 @media (max-width: 1200px) {
